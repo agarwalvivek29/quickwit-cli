@@ -1,0 +1,25 @@
+# Binaries
+/bin/
+/dist/
+qw
+qwproxy
+*.exe
+
+# Test / coverage
+*.out
+coverage.*
+
+# Local env / secrets — never commit
+*.env
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local data volumes from docker-compose
+deploy/compose/.data/

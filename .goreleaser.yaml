@@ -1,0 +1,52 @@
+version: 2
+
+project_name: quickwit-cli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: qw
+    main: ./cmd/qw
+    binary: qw
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+  - id: qwproxy
+    main: ./cmd/qwproxy
+    binary: qwproxy
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - id: qw
+    ids: [qw]
+    name_template: "qw_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+dockers:
+  - id: qwproxy
+    ids: [qwproxy]
+    image_templates:
+      - "ghcr.io/agarwalvivek29/qwproxy:{{ .Version }}"
+      - "ghcr.io/agarwalvivek29/qwproxy:latest"
+    dockerfile: cmd/qwproxy/Dockerfile
+    build_flag_templates:
+      - "--platform=linux/amd64"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+release:
+  prerelease: auto
