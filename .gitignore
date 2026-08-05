@@ -1,8 +1,8 @@
-# Binaries
+# Binaries (anchored to repo root so they don't shadow internal/qw, cmd/qwproxy)
 /bin/
 /dist/
-qw
-qwproxy
+/qw
+/qwproxy
 *.exe
 
 # Test / coverage
