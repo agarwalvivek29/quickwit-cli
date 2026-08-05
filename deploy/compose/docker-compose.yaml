@@ -1,0 +1,101 @@
+# Local simulation of the qwproxy deployment: Keycloak (stands in for Okta),
+# a single-node Quickwit (seeded with a sample index + logs), Postgres (the
+# audit store), and qwproxy in front. Everything talks over the compose network
+# using the service names as hostnames, so the OIDC issuer is a single stable
+# URL (http://keycloak:8080/realms/quickwit) for every component.
+#
+#   make sim-up      # start keycloak + quickwit + postgres + qwproxy (+ seed)
+#   make e2e         # run the end-to-end smoke test
+#   make sim-down    # tear it all down
+#
+# Host-side `qw` usage: add `127.0.0.1 keycloak` to /etc/hosts so the CLI's
+# token issuer resolves to the same URL the proxy validates against.
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm.json:/opt/keycloak/data/import/realm.json:ro
+
+  quickwit:
+    image: quickwit/quickwit:0.8.2
+    command: ["run"]
+    environment:
+      QW_LISTEN_ADDRESS: 0.0.0.0
+      QW_DISABLE_TELEMETRY: "1"
+      NO_COLOR: "1"
+    ports:
+      - "7280:7280"
+    volumes:
+      - qwdata:/quickwit/qwdata
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: qwaudit
+      POSTGRES_PASSWORD: qwaudit
+      POSTGRES_DB: qwaudit
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qwaudit -d qwaudit"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  qwproxy:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      QWPROXY_LISTEN_ADDR: ":9000"
+      QWPROXY_UPSTREAM: http://quickwit:7280
+      QWPROXY_OIDC_ISSUER: http://keycloak:8080/realms/quickwit
+      QWPROXY_OIDC_AUDIENCE: "" # sim: skip aud check (prod sets the API audience)
+      QWPROXY_AUDIT_DSN: postgres://qwaudit:qwaudit@postgres:5432/qwaudit?sslmode=disable
+    ports:
+      - "9000:9000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # keycloak/quickwit may still be starting; retry until discovery + DB are up.
+    restart: on-failure
+
+  # One-shot: create the sample index and ingest recent logs, then exit.
+  seed:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["sh", "/seed/seed.sh"]
+    volumes:
+      - ./seed:/seed:ro
+    depends_on:
+      - quickwit
+    restart: on-failure
+
+  # End-to-end smoke test (profile-gated; run via `make e2e`). Builds and drives
+  # the real qw binary against the running stack from inside the network.
+  e2e:
+    image: golang:1.26
+    working_dir: /src
+    entrypoint: ["sh", "/e2e/e2e.sh"]
+    environment:
+      GOFLAGS: -buildvcs=false
+    volumes:
+      - ../..:/src
+      - ./e2e:/e2e:ro
+    profiles: ["tools"]
+    depends_on:
+      - qwproxy
+
+volumes:
+  qwdata:
+  pgdata:

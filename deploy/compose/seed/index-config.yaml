@@ -1,0 +1,25 @@
+version: 0.8
+index_id: core-logs
+doc_mapping:
+  mode: dynamic
+  timestamp_field: timestamp
+  field_mappings:
+    - name: timestamp
+      type: datetime
+      input_formats: [unix_timestamp, rfc3339]
+      fast_precision: seconds
+      fast: true
+    - name: level
+      type: text
+      tokenizer: raw
+    - name: service
+      type: text
+      tokenizer: raw
+    - name: message
+      type: text
+      tokenizer: default
+      record: position
+indexing_settings:
+  commit_timeout_secs: 5
+search_settings:
+  default_search_fields: [message]

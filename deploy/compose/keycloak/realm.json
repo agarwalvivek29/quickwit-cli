@@ -1,0 +1,37 @@
+{
+  "realm": "quickwit",
+  "enabled": true,
+  "sslRequired": "none",
+  "accessTokenLifespan": 3600,
+  "clients": [
+    {
+      "clientId": "qw-cli",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://127.0.0.1:*/callback",
+        "http://localhost:*/callback"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "true"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "dev",
+      "enabled": true,
+      "email": "dev@example.com",
+      "emailVerified": true,
+      "firstName": "Dev",
+      "lastName": "User",
+      "credentials": [
+        { "type": "password", "value": "dev", "temporary": false }
+      ]
+    }
+  ]
+}

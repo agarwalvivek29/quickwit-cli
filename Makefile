@@ -58,6 +58,19 @@ sim-down: ## Tear down the local simulation stack + volumes
 sim-logs: ## Follow simulation stack logs
 	$(COMPOSE) logs -f
 
+.PHONY: e2e
+e2e: ## Bring up the stack and run the end-to-end smoke test
+	$(COMPOSE) up -d --build
+	$(COMPOSE) --profile tools run --rm e2e
+	@echo "--- audit rows in Postgres ---"
+	$(COMPOSE) exec -T postgres psql -U qwaudit -d qwaudit -tAc \
+	  "select count(*) as rows, coalesce(max(index),'-') as last_index from qw_audit;"
+
+.PHONY: sim-audit
+sim-audit: ## Show the most recent audit rows
+	$(COMPOSE) exec -T postgres psql -U qwaudit -d qwaudit -c \
+	  "select ts, principal_email, method, index, status_code, latency_ms, query_body from qw_audit order by ts desc limit 10;"
+
 .PHONY: clean
 clean: ## Remove build artifacts
 	rm -rf $(BIN) dist coverage.out
