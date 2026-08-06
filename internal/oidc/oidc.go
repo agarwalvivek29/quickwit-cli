@@ -47,6 +47,9 @@ var defaultScopes = []string{coreoidc.ScopeOpenID, "profile", "email", coreoidc.
 type ProviderConfig struct {
 	Issuer   string
 	ClientID string
+	// Secret is optional; set it for a confidential client (Okta "Web" app) so the
+	// auth-code / device / refresh flows authenticate the client. Empty = public/PKCE.
+	Secret   string
 	Audience string   // optional; requested so the access token's aud matches the API
 	Scopes   []string // optional; defaults to defaultScopes
 }
@@ -103,9 +106,10 @@ func New(ctx context.Context, pc ProviderConfig) (*Authenticator, error) {
 	ep.DeviceAuthURL = disco.DeviceAuthURL
 
 	conf := &oauth2.Config{
-		ClientID: pc.ClientID,
-		Endpoint: ep,
-		Scopes:   scopes,
+		ClientID:     pc.ClientID,
+		ClientSecret: pc.Secret, // empty for public/PKCE clients; set for confidential
+		Endpoint:     ep,
+		Scopes:       scopes,
 	}
 	return &Authenticator{
 		pc:       pc,

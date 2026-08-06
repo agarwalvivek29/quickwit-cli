@@ -91,11 +91,14 @@ func (a *App) resolveContext() (*config.Context, *config.Config, string, error) 
 	return ctx, cfg, path, nil
 }
 
-// providerConfig builds the OIDC provider config from a context.
-func providerConfig(c *config.Context) oidc.ProviderConfig {
+// providerConfig builds the OIDC provider config from a context. secret is the
+// client secret for a confidential client (empty for public/PKCE clients),
+// sourced from --client-secret / QW_CLIENT_SECRET.
+func providerConfig(c *config.Context, secret string) oidc.ProviderConfig {
 	return oidc.ProviderConfig{
 		Issuer:   c.OIDC.Issuer,
 		ClientID: c.OIDC.ClientID,
+		Secret:   secret,
 		Audience: c.OIDC.Audience,
 		Scopes:   c.OIDC.Scopes,
 	}
@@ -181,7 +184,7 @@ func (a *App) tokenSource(ctx context.Context, cctx *config.Context, cfg *config
 			return nil, fmt.Errorf("client-credentials auth needs an issuer and client-id " +
 				"(set them on the context, or via QW_ISSUER / QW_CLIENT_ID)")
 		}
-		auth, err := oidc.New(ctx, providerConfig(cctx))
+		auth, err := oidc.New(ctx, providerConfig(cctx, a.ClientSecret))
 		if err != nil {
 			return nil, err
 		}
@@ -192,7 +195,7 @@ func (a *App) tokenSource(ctx context.Context, cctx *config.Context, cfg *config
 			return nil, fmt.Errorf("not logged in for context %q: run `qw login` "+
 				"(or set QW_TOKEN / QW_CLIENT_SECRET for non-interactive auth)", cctx.Name)
 		}
-		auth, err := oidc.New(ctx, providerConfig(cctx))
+		auth, err := oidc.New(ctx, providerConfig(cctx, a.ClientSecret))
 		if err != nil {
 			return nil, err
 		}
