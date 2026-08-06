@@ -19,12 +19,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"runtime"
 	"time"
 
 	coreoidc "github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 // randomState returns an unguessable OAuth state value for CSRF protection.
@@ -131,7 +133,7 @@ func (a *Authenticator) Login(ctx context.Context) (*Tokens, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bind loopback listener: %w", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	redirectURL := fmt.Sprintf("http://%s/callback", ln.Addr().String())
 	conf := *a.conf // copy so RedirectURL is per-login
@@ -228,6 +230,29 @@ func (a *Authenticator) LoginDevice(ctx context.Context, prompt func(DevicePromp
 		return nil, fmt.Errorf("device token poll: %w", err)
 	}
 	return tokensFrom(tok), nil
+}
+
+// ClientCredentialsTokenSource returns an auto-refreshing token source that
+// mints access tokens via the OAuth 2.0 client-credentials grant — the
+// machine-to-machine flow for CI/cron, where there is no user and no browser.
+// The provider's OIDC client must be confidential and have this grant enabled.
+// Unlike the interactive flows this one does hold a secret, so callers should
+// source it from the environment (QW_CLIENT_SECRET), not a flag.
+func (a *Authenticator) ClientCredentialsTokenSource(ctx context.Context, clientSecret string) oauth2.TokenSource {
+	cc := &clientcredentials.Config{
+		ClientID:     a.pc.ClientID,
+		ClientSecret: clientSecret,
+		TokenURL:     a.conf.Endpoint.TokenURL,
+		AuthStyle:    oauth2.AuthStyleAutoDetect,
+	}
+	if len(a.pc.Scopes) > 0 {
+		cc.Scopes = a.pc.Scopes
+	}
+	// Auth0/Okta custom authorization servers select the API by "audience".
+	if a.pc.Audience != "" {
+		cc.EndpointParams = url.Values{"audience": {a.pc.Audience}}
+	}
+	return cc.TokenSource(ctx)
 }
 
 // TokenSource returns an auto-refreshing token source seeded from prev. When a

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/itchyny/gojq"
 	"golang.org/x/term"
 )
 
@@ -29,6 +30,9 @@ var (
 
 // renderHits writes hits in the app's chosen output format.
 func (a *App) renderHits(hits []json.RawMessage) error {
+	if a.JQ != "" {
+		return a.renderJQ(hits)
+	}
 	switch a.Output {
 	case outJSON:
 		return a.renderJSON(hits)
@@ -37,6 +41,38 @@ func (a *App) renderHits(hits []json.RawMessage) error {
 	default:
 		return a.renderTable(hits)
 	}
+}
+
+// renderJQ applies the --jq expression to the hits array (the same value
+// `-o json` would print) and streams each result as JSON — no external `jq`
+// needed. Example: `--jq '.[] | {ts: .timestamp, msg: .message}'`.
+func (a *App) renderJQ(hits []json.RawMessage) error {
+	query, err := gojq.Parse(a.JQ)
+	if err != nil {
+		return fmt.Errorf("parse --jq %q: %w", a.JQ, err)
+	}
+	docs := make([]any, len(hits))
+	for i, h := range hits {
+		if err := json.Unmarshal(h, &docs[i]); err != nil {
+			return fmt.Errorf("decode hit %d: %w", i, err)
+		}
+	}
+	enc := json.NewEncoder(a.Out)
+	enc.SetIndent("", "  ")
+	iter := query.Run(docs)
+	for {
+		v, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if e, ok := v.(error); ok {
+			return fmt.Errorf("jq: %w", e)
+		}
+		if err := enc.Encode(v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) renderJSON(hits []json.RawMessage) error {

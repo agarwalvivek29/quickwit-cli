@@ -20,6 +20,25 @@ func newWhoamiCmd(app *App) *cobra.Command {
 	}
 }
 
+func newVersionCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print qw version, commit, and build date",
+		Args:  cobra.NoArgs,
+		RunE:  func(c *cobra.Command, _ []string) error { return app.printVersion() },
+	}
+}
+
+func (a *App) printVersion() error {
+	if a.Output == outJSON {
+		return writeJSONValue(a.Out, map[string]string{"version": version, "commit": commit, "date": date})
+	}
+	fmt.Fprintf(a.Out, "qw %s\n", version)
+	fmt.Fprintf(a.Out, "  commit: %s\n", commit)
+	fmt.Fprintf(a.Out, "  built:  %s\n", date)
+	return nil
+}
+
 func newPingCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ping",

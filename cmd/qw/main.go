@@ -20,7 +20,7 @@ var (
 )
 
 func main() {
-	cli.SetVersion(version)
+	cli.SetBuildInfo(version, commit, date)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

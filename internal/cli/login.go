@@ -19,7 +19,12 @@ func newLoginCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate the selected context via OIDC",
-		Args:  cobra.NoArgs,
+		Long: "Authenticate the selected context via OIDC (browser by default; --device for\n" +
+			"headless hosts). For CI/cron, skip login entirely and set QW_TOKEN (a static\n" +
+			"bearer) or QW_CLIENT_SECRET (client-credentials) instead — see `qw --help`.",
+		Example: "  qw login\n  qw login --device        # headless/SSH box (device code)\n" +
+			"  qw --context prod login",
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return app.runLogin(c.Context(), device)
 		},

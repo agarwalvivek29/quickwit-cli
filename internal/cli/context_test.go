@@ -165,6 +165,59 @@ func TestContextCreateUpdatePreservesToken(t *testing.T) {
 	}
 }
 
+func TestContextDeleteClearsCurrent(t *testing.T) {
+	path := seedConfig(t) // current = stage
+	if _, _, err := runCmd(t, "--config", path, "context", "delete", "stage"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := config.Load(path)
+	if _, err := cfg.Context("stage"); err == nil {
+		t.Error("stage context should be gone")
+	}
+	if cfg.CurrentContext != "" {
+		t.Errorf("deleting the current context should clear current-context, got %q", cfg.CurrentContext)
+	}
+	// Deleting an unknown context errors.
+	if _, _, err := runCmd(t, "--config", path, "context", "delete", "ghost"); err == nil {
+		t.Error("expected error deleting unknown context")
+	}
+}
+
+func TestConfigViewRedactsTokens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	seed := &config.Config{
+		CurrentContext: "local",
+		Contexts: []*config.Context{{
+			Name:     "local",
+			Endpoint: "http://x:9000",
+			OIDC:     config.OIDCConfig{Issuer: "http://idp", ClientID: "qw-cli"},
+			Auth:     &config.AuthTokens{AccessToken: "super-secret-token", RefreshToken: "refresh-secret"},
+		}},
+	}
+	if err := config.Save(path, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _, err := runCmd(t, "--config", path, "config", "view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "super-secret-token") || strings.Contains(out, "refresh-secret") {
+		t.Errorf("config view leaked a token:\n%s", out)
+	}
+	if !strings.Contains(out, redacted) {
+		t.Errorf("config view should mark redacted tokens:\n%s", out)
+	}
+
+	rawOut, _, err := runCmd(t, "--config", path, "config", "view", "--raw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rawOut, "super-secret-token") {
+		t.Errorf("config view --raw should reveal the token:\n%s", rawOut)
+	}
+}
+
 func TestWhoamiNotLoggedIn(t *testing.T) {
 	path := seedConfig(t)
 	out, _, err := runCmd(t, "--config", path, "--context", "local", "whoami")
