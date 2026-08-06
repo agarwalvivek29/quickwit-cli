@@ -40,6 +40,13 @@ qw login                 # opens a browser (Authorization Code + PKCE)
 qw login --device        # headless/SSH box: device-code flow instead
 ```
 
+`qw login` uses a fixed loopback redirect `http://127.0.0.1:8765/callback`, which
+must be registered on the OIDC app (providers like Okta require an exact match —
+no wildcard). If login 400s with a `redirect_uri` error, register that exact URI
+or override the port with `qw login --redirect-port <port>` (and register the
+matching URI). On a headless box use `qw login --device` (no redirect at all). A
+confidential app (Okta "Web") also needs its secret: `--client-secret` / `QW_CLIENT_SECRET`.
+
 Switch environments with `qw context use <name>`, or per-command with
 `--context <name>` (or the `QW_CONTEXT` env var). If a command fails with
 "not logged in", run `qw login`. Manage the config with `qw config path`

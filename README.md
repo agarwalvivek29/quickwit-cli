@@ -87,6 +87,16 @@ Precedence: `QW_TOKEN` → `QW_CLIENT_SECRET` → cached `qw login` tokens. Flag
 env var. Add `--debug`/`-v` to trace each HTTP request (the bearer is redacted).
 `--jq '<expr>'` filters JSON output with a built-in jq engine (no `jq` binary needed).
 
+## Configuration
+
+`qw` keeps its contexts and cached tokens in one YAML file (kubeconfig-style), resolved in order:
+
+```
+--config <path>   →   $QW_CONFIG   →   $XDG_CONFIG_HOME/qw/config.yaml   →   ~/.config/qw/config.yaml
+```
+
+**Browser login redirect.** `qw login` uses a fixed loopback redirect, `http://127.0.0.1:8765/callback`, which must be registered as a Sign-in redirect URI on your OIDC app. It is deliberately a *fixed* port (not an ephemeral one, and not a wildcard) because providers such as Okta require the redirect URI — port included — to match exactly. Override it with `qw login --redirect-port <port>` (or `QW_REDIRECT_PORT`) and register the matching URI. Headless hosts skip redirects entirely with `qw login --device`. Confidential OIDC clients (e.g. an Okta "Web" app) additionally need their secret at token exchange — pass it via `--client-secret` / `QW_CLIENT_SECRET`.
+
 ## Handy commands
 
 ```sh
