@@ -66,6 +66,11 @@ e2e: ## Bring up the stack and run the end-to-end smoke test
 	$(COMPOSE) exec -T postgres psql -U qwaudit -d qwaudit -tAc \
 	  "select count(*) as rows, coalesce(max(index),'-') as last_index from qw_audit;"
 
+.PHONY: demo
+demo: ## Run the narrated CLI-through-proxy walkthrough (see docs/EXAMPLES.md)
+	$(COMPOSE) up -d --build
+	$(COMPOSE) --profile tools run --rm demo
+
 .PHONY: sim-audit
 sim-audit: ## Show the most recent audit rows
 	$(COMPOSE) exec -T postgres psql -U qwaudit -d qwaudit -c \

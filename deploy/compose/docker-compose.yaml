@@ -96,6 +96,20 @@ services:
     depends_on:
       - qwproxy
 
+  # Narrated walkthrough that produces docs/EXAMPLES.md (profile-gated).
+  demo:
+    image: golang:1.26
+    working_dir: /src
+    entrypoint: ["sh", "/demo/demo.sh"]
+    environment:
+      GOFLAGS: -buildvcs=false
+    volumes:
+      - ../..:/src
+      - ./demo:/demo:ro
+    profiles: ["tools"]
+    depends_on:
+      - qwproxy
+
 volumes:
   qwdata:
   pgdata:

@@ -61,8 +61,9 @@ make sim-down
 
 ## Documentation
 
+- [`docs/EXAMPLES.md`](./docs/EXAMPLES.md) — a real, captured first run of `qw` through the proxy (search, tail, histogram, and the audit trail it produces). Start here.
 - [`CONTRIBUTING.md`](./CONTRIBUTING.md) — dev setup, tests, commit conventions.
-- [`docs/`](./docs) — architecture and the deployment model (added as the project grows).
+- Reproduce the examples locally: `make sim-up && make demo`.
 
 ## License
 
