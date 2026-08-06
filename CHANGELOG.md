@@ -14,5 +14,5 @@ All notable changes to this project are documented here. The format is based on
 - `internal/audit`: async, drop-on-full Postgres writer; monthly-partitioned schema with a 12-month retention window.
 - `internal/timeparse`: human time expressions (`15m`, RFC3339, epoch, `now`) to epoch seconds.
 - `qwproxy`: OIDC auth + read-only allowlist + streaming reverse proxy + request-envelope audit (never response bodies) + Prometheus metrics.
-- `qw`: `login`/`login --device`, `context`, `indexes list|describe|fields`, `search`, `tail`, `count`, `histogram`, `whoami`, `ping`; `-o table|json|raw`, `--fields`, `--since/--from/--to`, level colorization, shell completion.
+- `qw`: `login`/`login --device`, `context create|list|use|current`, `indexes list|describe|fields`, `search`, `tail`, `count`, `histogram`, `whoami`, `ping`; `-o table|json|raw`, `--fields`, `--since/--from/--to`, level colorization, shell completion.
 - `deploy/compose`: local simulation stack (Keycloak + seeded Quickwit + Postgres + qwproxy) and an end-to-end smoke test.

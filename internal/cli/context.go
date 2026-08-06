@@ -16,6 +16,7 @@ func newContextCmd(app *App) *cobra.Command {
 		Short:   "Manage contexts",
 	}
 	cmd.AddCommand(
+		newContextCreateCmd(app),
 		&cobra.Command{
 			Use:   "list",
 			Short: "List configured contexts",
@@ -36,6 +37,87 @@ func newContextCmd(app *App) *cobra.Command {
 		},
 	)
 	return cmd
+}
+
+// newContextCreateCmd creates (or updates) a context from flags.
+func newContextCreateCmd(app *App) *cobra.Command {
+	var (
+		endpoint     string
+		issuer       string
+		clientID     string
+		audience     string
+		defaultIndex string
+		use          bool
+	)
+	cmd := &cobra.Command{
+		Use:     "create <name>",
+		Aliases: []string{"add", "set"},
+		Short:   "Create or update a context",
+		Long: "Create or update a context. --endpoint is required; --issuer and --client-id are\n" +
+			"needed before `qw login` will work (you can add them now or re-run to update).",
+		Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			return app.contextCreate(args[0], config.OIDCConfig{Issuer: issuer, ClientID: clientID, Audience: audience}, endpoint, defaultIndex, use)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&endpoint, "endpoint", "", "proxy (or Quickwit) base URL, e.g. https://qwproxy.internal:443 (required)")
+	f.StringVar(&issuer, "issuer", "", "OIDC issuer URL")
+	f.StringVar(&clientID, "client-id", "", "OIDC client id")
+	f.StringVar(&audience, "audience", "", "OIDC audience (optional)")
+	f.StringVar(&defaultIndex, "default-index", "", "default index for search/count/tail/histogram")
+	f.BoolVar(&use, "use", false, "switch to this context after creating it")
+	_ = cmd.MarkFlagRequired("endpoint")
+	return cmd
+}
+
+func (a *App) contextCreate(name string, oidc config.OIDCConfig, endpoint, defaultIndex string, use bool) error {
+	cfg, path, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	// Preserve cached tokens when updating an existing context.
+	var auth *config.AuthTokens
+	prev, prevErr := cfg.Context(name)
+	existed := prevErr == nil
+	if existed {
+		auth = prev.Auth
+	}
+	cfg.Upsert(&config.Context{
+		Name:         name,
+		Endpoint:     endpoint,
+		OIDC:         oidc,
+		DefaultIndex: defaultIndex,
+		Auth:         auth,
+	})
+	if use || cfg.CurrentContext == "" {
+		_ = cfg.Use(name)
+	}
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+
+	verb := "Created"
+	if existed {
+		verb = "Updated"
+	}
+	fmt.Fprintf(a.Out, "%s context %q (endpoint %s)\n", verb, name, endpoint)
+	if oidc.Issuer == "" || oidc.ClientID == "" {
+		fmt.Fprintln(a.Err, "note: set --issuer and --client-id before running `qw login`")
+	} else {
+		fmt.Fprintf(a.Out, "Next: qw %slogin\n", contextFlagHint(a, name))
+	}
+	return nil
+}
+
+// contextFlagHint suggests --context in the login hint unless the new context
+// is already current.
+func contextFlagHint(a *App, name string) string {
+	cfg, _, err := a.loadConfig()
+	if err == nil && cfg.CurrentContext == name {
+		return ""
+	}
+	return fmt.Sprintf("--context %s ", name)
 }
 
 func (a *App) contextList() error {

@@ -18,13 +18,28 @@ make sim-down
 
 ## 1. Log in and pick a context
 
-A context points `qw` at a proxy endpoint and an OIDC issuer. You log in once;
-the token is cached (0600) in `~/.config/qw/config.yaml` and refreshed
-automatically.
+A context points `qw` at a proxy endpoint and an OIDC issuer. Create one once
+(the first context becomes current automatically; `--use` switches to it
+explicitly), then log in — the token is cached (0600) in
+`~/.config/qw/config.yaml` and refreshed automatically.
 
 ```sh
-qw context use stage
+qw context create stage \
+  --endpoint https://qwproxy.internal:443 \
+  --issuer https://acme.okta.com/oauth2/default \
+  --client-id qw-cli \
+  --default-index core-logs \
+  --use
+
 qw login                 # opens your browser (Okta/Keycloak); --device for headless
+```
+
+```console
+$ qw context create stage --endpoint https://qwproxy.internal:443 \
+    --issuer https://acme.okta.com/oauth2/default --client-id qw-cli \
+    --default-index core-logs --use
+Created context "stage" (endpoint https://qwproxy.internal:443)
+Next: qw login
 ```
 
 ```console

@@ -87,6 +87,84 @@ func TestInvalidOutputRejected(t *testing.T) {
 	}
 }
 
+func TestContextCreate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	out, _, err := runCmd(t, "--config", path, "context", "create", "local",
+		"--endpoint", "http://qwproxy:9000",
+		"--issuer", "http://idp/realms/quickwit",
+		"--client-id", "qw-cli",
+		"--default-index", "core-logs",
+		"--use")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Created context \"local\"") {
+		t.Errorf("output = %q", out)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CurrentContext != "local" || len(cfg.Contexts) != 1 {
+		t.Fatalf("config = %+v", cfg)
+	}
+	c := cfg.Contexts[0]
+	if c.Endpoint != "http://qwproxy:9000" || c.OIDC.Issuer != "http://idp/realms/quickwit" ||
+		c.OIDC.ClientID != "qw-cli" || c.DefaultIndex != "core-logs" {
+		t.Errorf("context = %+v", c)
+	}
+}
+
+func TestContextCreateFirstBecomesCurrent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	// No --use, but it is the first context, so it must become current.
+	if _, _, err := runCmd(t, "--config", path, "context", "create", "only", "--endpoint", "http://x"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := config.Load(path)
+	if cfg.CurrentContext != "only" {
+		t.Errorf("first context should become current, got %q", cfg.CurrentContext)
+	}
+}
+
+func TestContextCreateRequiresEndpoint(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, _, err := runCmd(t, "--config", path, "context", "create", "local"); err == nil {
+		t.Error("expected error when --endpoint is missing")
+	}
+}
+
+func TestContextCreateUpdatePreservesToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	seed := &config.Config{
+		CurrentContext: "local",
+		Contexts: []*config.Context{{
+			Name:     "local",
+			Endpoint: "http://old:9000",
+			OIDC:     config.OIDCConfig{Issuer: "http://idp", ClientID: "qw-cli"},
+			Auth:     &config.AuthTokens{AccessToken: "keep-me"},
+		}},
+	}
+	if err := config.Save(path, seed); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := runCmd(t, "--config", path, "context", "create", "local", "--endpoint", "http://new:9000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Updated context") {
+		t.Errorf("expected 'Updated', got %q", out)
+	}
+	cfg, _ := config.Load(path)
+	c := cfg.Contexts[0]
+	if c.Endpoint != "http://new:9000" {
+		t.Errorf("endpoint not updated: %q", c.Endpoint)
+	}
+	if c.Auth == nil || c.Auth.AccessToken != "keep-me" {
+		t.Errorf("cached token not preserved on update: %+v", c.Auth)
+	}
+}
+
 func TestWhoamiNotLoggedIn(t *testing.T) {
 	path := seedConfig(t)
 	out, _, err := runCmd(t, "--config", path, "--context", "local", "whoami")
