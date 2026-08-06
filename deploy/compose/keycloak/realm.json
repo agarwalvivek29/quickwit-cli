@@ -11,8 +11,7 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
       "redirectUris": [
-        "http://127.0.0.1:*/callback",
-        "http://localhost:*/callback"
+        "http://127.0.0.1:8765/callback"
       ],
       "webOrigins": ["+"],
       "attributes": {

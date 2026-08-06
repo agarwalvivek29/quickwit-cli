@@ -135,7 +135,7 @@ func (s *PGXSink) InsertBatch(ctx context.Context, recs []Record) error {
 		)
 	}
 	br := s.pool.SendBatch(ctx, batch)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for range recs {
 		if _, err := br.Exec(); err != nil {
 			return err

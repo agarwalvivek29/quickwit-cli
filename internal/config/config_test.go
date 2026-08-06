@@ -6,6 +6,37 @@ import (
 	"testing"
 )
 
+func TestDelete(t *testing.T) {
+	c := &Config{
+		CurrentContext: "a",
+		Contexts: []*Context{
+			{Name: "a", Endpoint: "http://a"},
+			{Name: "b", Endpoint: "http://b"},
+		},
+	}
+	if err := c.Delete("a"); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Contexts) != 1 || c.Contexts[0].Name != "b" {
+		t.Errorf("contexts after delete = %+v", c.Contexts)
+	}
+	if c.CurrentContext != "" {
+		t.Errorf("deleting current context should clear current-context, got %q", c.CurrentContext)
+	}
+	if err := c.Delete("missing"); err == nil {
+		t.Error("expected error deleting a missing context")
+	}
+	// Deleting a non-current context leaves current-context intact.
+	c.CurrentContext = "b"
+	c.Contexts = append(c.Contexts, &Context{Name: "c"})
+	if err := c.Delete("c"); err != nil {
+		t.Fatal(err)
+	}
+	if c.CurrentContext != "b" {
+		t.Errorf("current-context changed unexpectedly: %q", c.CurrentContext)
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sub", "config.yaml")
 	in := &Config{

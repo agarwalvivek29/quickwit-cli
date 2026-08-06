@@ -28,16 +28,13 @@ archives:
   - id: qw
     ids: [qw]
     name_template: "qw_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-
-dockers:
   - id: qwproxy
     ids: [qwproxy]
-    image_templates:
-      - "ghcr.io/agarwalvivek29/qwproxy:{{ .Version }}"
-      - "ghcr.io/agarwalvivek29/qwproxy:latest"
-    dockerfile: cmd/qwproxy/Dockerfile
-    build_flag_templates:
-      - "--platform=linux/amd64"
+    name_template: "qwproxy_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+# The qwproxy container image is published separately by
+# .github/workflows/docker.yml (multi-arch + an :edge tag off main), so there
+# is intentionally no `dockers:` block here.
 
 checksum:
   name_template: "checksums.txt"

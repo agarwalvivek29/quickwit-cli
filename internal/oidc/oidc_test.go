@@ -196,7 +196,7 @@ func TestLoginPKCE(t *testing.T) {
 		go func() {
 			resp, err := http.Get(redir + "?code=fakecode&state=" + url.QueryEscape(state))
 			if err == nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		}()
 		return nil

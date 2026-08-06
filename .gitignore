@@ -15,6 +15,10 @@ coverage.*
 .env.*
 !.env.example
 
+# Local qw config files (hold cached OIDC tokens) — never commit
+/test.yaml
+/*.local.yaml
+
 # Editor / OS
 .DS_Store
 .idea/

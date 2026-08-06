@@ -83,7 +83,11 @@ func newSearchCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search [index] <query>",
 		Short: "Search logs",
-		Args:  cobra.RangeArgs(1, 2),
+		Example: "  qw search core-logs 'level:ERROR AND service:api' --since 1h\n" +
+			"  qw search 'trace_id:abc123' --since 6h -o json      # [index] omitted -> default-index\n" +
+			"  qw search core-logs 'status:[500 TO 599]' --fields timestamp,service,message\n" +
+			"  qw search core-logs '*' --jq '.[].message'          # built-in jq, no shell needed",
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(c *cobra.Command, args []string) error {
 			client, cctx, err := app.authedClient(c.Context())
 			if err != nil {
@@ -124,9 +128,10 @@ func newSearchCmd(app *App) *cobra.Command {
 func newCountCmd(app *App) *cobra.Command {
 	var tf timeFlags
 	cmd := &cobra.Command{
-		Use:   "count [index] <query>",
-		Short: "Count matching logs",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:     "count [index] <query>",
+		Short:   "Count matching logs",
+		Example: "  qw count core-logs 'status:[500 TO 599]' --since 1d",
+		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(c *cobra.Command, args []string) error {
 			client, cctx, err := app.authedClient(c.Context())
 			if err != nil {
@@ -159,6 +164,7 @@ func newHistogramCmd(app *App) *cobra.Command {
 		Use:     "histogram [index] <query>",
 		Aliases: []string{"hist"},
 		Short:   "Show matching log volume over time",
+		Example: "  qw histogram core-logs 'level:ERROR' --since 6h --interval 15m",
 		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(c *cobra.Command, args []string) error {
 			return app.runHistogram(c.Context(), args, &tf, interval)
@@ -232,9 +238,10 @@ func newTailCmd(app *App) *cobra.Command {
 	var tf timeFlags
 	var interval time.Duration
 	cmd := &cobra.Command{
-		Use:   "tail [index] <query>",
-		Short: "Follow logs (poll-based; Ctrl-C to stop)",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:     "tail [index] <query>",
+		Short:   "Follow logs (poll-based; Ctrl-C to stop)",
+		Example: "  qw tail core-logs 'service:api' -o raw --fields message",
+		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(c *cobra.Command, args []string) error {
 			return app.runTail(c.Context(), args, &tf, interval)
 		},

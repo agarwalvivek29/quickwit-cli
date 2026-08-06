@@ -35,8 +35,34 @@ func newContextCmd(app *App) *cobra.Command {
 			Args:  cobra.NoArgs,
 			RunE:  func(c *cobra.Command, _ []string) error { return app.contextCurrent() },
 		},
+		&cobra.Command{
+			Use:     "delete <name>",
+			Aliases: []string{"rm", "remove"},
+			Short:   "Delete a context",
+			Args:    cobra.ExactArgs(1),
+			RunE:    func(c *cobra.Command, args []string) error { return app.contextDelete(args[0]) },
+		},
 	)
 	return cmd
+}
+
+func (a *App) contextDelete(name string) error {
+	cfg, path, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	wasCurrent := cfg.CurrentContext == name
+	if err := cfg.Delete(name); err != nil {
+		return err
+	}
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.Out, "Deleted context %q\n", name)
+	if wasCurrent {
+		fmt.Fprintln(a.Err, "note: that was the current context; select another with `qw context use <name>`")
+	}
+	return nil
 }
 
 // newContextCreateCmd creates (or updates) a context from flags.
@@ -55,6 +81,8 @@ func newContextCreateCmd(app *App) *cobra.Command {
 		Short:   "Create or update a context",
 		Long: "Create or update a context. --endpoint is required; --issuer and --client-id are\n" +
 			"needed before `qw login` will work (you can add them now or re-run to update).",
+		Example: "  qw context create prod --endpoint https://qwproxy.internal \\\n" +
+			"    --issuer https://acme.okta.com --client-id qw-cli --default-index core-logs --use",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			return app.contextCreate(args[0], config.OIDCConfig{Issuer: issuer, ClientID: clientID, Audience: audience}, endpoint, defaultIndex, use)

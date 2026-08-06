@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -14,21 +15,43 @@ import (
 	"github.com/agarwalvivek29/quickwit-cli/internal/oidc"
 )
 
+// defaultRedirectPort is the fixed loopback port the browser-login flow uses.
+// It is fixed (not ephemeral) because providers like Okta require the redirect
+// URI — including the port — to be registered exactly. Register
+// http://127.0.0.1:8765/callback in the app; override with --redirect-port.
+const defaultRedirectPort = "8765"
+
 func newLoginCmd(app *App) *cobra.Command {
 	var device bool
+	var redirectPort string
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate the selected context via OIDC",
-		Args:  cobra.NoArgs,
+		Long: "Authenticate the selected context via OIDC (browser by default; --device for\n" +
+			"headless hosts). For CI/cron, skip login entirely and set QW_TOKEN (a static\n" +
+			"bearer) or QW_CLIENT_SECRET (client-credentials) instead — see `qw --help`.\n\n" +
+			"The browser flow uses a fixed loopback redirect, http://127.0.0.1:8765/callback,\n" +
+			"which must be registered in the app (providers like Okta require an exact match).\n" +
+			"Override the port with --redirect-port / QW_REDIRECT_PORT.",
+		Example: "  qw login\n  qw login --device               # headless/SSH box (device code)\n" +
+			"  qw login --redirect-port 9000   # if 8765 is taken / a different URI is registered",
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return app.runLogin(c.Context(), device)
+			if redirectPort == "" {
+				redirectPort = os.Getenv("QW_REDIRECT_PORT")
+			}
+			if redirectPort == "" {
+				redirectPort = defaultRedirectPort
+			}
+			return app.runLogin(c.Context(), device, redirectPort)
 		},
 	}
 	cmd.Flags().BoolVar(&device, "device", false, "use the device authorization grant (for headless hosts)")
+	cmd.Flags().StringVar(&redirectPort, "redirect-port", "", "loopback port for the browser redirect (default 8765; env QW_REDIRECT_PORT); register http://127.0.0.1:<port>/callback in the IdP")
 	return cmd
 }
 
-func (a *App) runLogin(ctx context.Context, device bool) error {
+func (a *App) runLogin(ctx context.Context, device bool, redirectPort string) error {
 	cctx, cfg, path, err := a.resolveContext()
 	if err != nil {
 		return err
@@ -37,9 +60,13 @@ func (a *App) runLogin(ctx context.Context, device bool) error {
 		return fmt.Errorf("context %q is missing oidc.issuer / oidc.client-id", cctx.Name)
 	}
 
-	auth, err := oidc.New(ctx, providerConfig(cctx))
+	auth, err := oidc.New(ctx, providerConfig(cctx, a.ClientSecret))
 	if err != nil {
 		return err
+	}
+	if !device && redirectPort != "" {
+		auth.BindAddr = "127.0.0.1:" + redirectPort
+		fmt.Fprintf(a.Err, "Using fixed redirect URI: http://127.0.0.1:%s/callback\n", redirectPort)
 	}
 
 	var toks *oidc.Tokens

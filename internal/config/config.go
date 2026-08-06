@@ -13,11 +13,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// EnvConfigPath overrides the config file location; EnvContext overrides the
-// selected context for a single invocation (mirrors KUBECONFIG / kubectl).
+// Environment overrides. EnvConfigPath / EnvContext mirror KUBECONFIG /
+// kubectl. The rest let a pipeline or cron authenticate with no interactive
+// login (and, with EnvEndpoint + a credential, no config file at all):
+//
+//	QW_ENDPOINT       proxy/Quickwit base URL (overrides the context endpoint)
+//	QW_TOKEN          static bearer token — skip OIDC entirely
+//	QW_CLIENT_SECRET  OIDC client-credentials secret — mint+refresh a token
+//	QW_ISSUER/QW_CLIENT_ID/QW_AUDIENCE  OIDC config for the no-config CI path
 const (
-	EnvConfigPath = "QW_CONFIG"
-	EnvContext    = "QW_CONTEXT"
+	EnvConfigPath   = "QW_CONFIG"
+	EnvContext      = "QW_CONTEXT"
+	EnvEndpoint     = "QW_ENDPOINT"
+	EnvToken        = "QW_TOKEN"
+	EnvClientSecret = "QW_CLIENT_SECRET"
+	EnvClientID     = "QW_CLIENT_ID"
+	EnvIssuer       = "QW_ISSUER"
+	EnvAudience     = "QW_AUDIENCE"
 )
 
 // Config is the whole file.
@@ -145,6 +157,21 @@ func (c *Config) Upsert(ctx *Context) {
 		}
 	}
 	c.Contexts = append(c.Contexts, ctx)
+}
+
+// Delete removes the named context. If it was the current context, the
+// current-context pointer is cleared. Returns an error if the context is absent.
+func (c *Config) Delete(name string) error {
+	for i, ctx := range c.Contexts {
+		if ctx.Name == name {
+			c.Contexts = append(c.Contexts[:i], c.Contexts[i+1:]...)
+			if c.CurrentContext == name {
+				c.CurrentContext = ""
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("context %q not found", name)
 }
 
 // Use sets current-context, requiring the context to exist.

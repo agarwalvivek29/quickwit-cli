@@ -36,4 +36,5 @@ jobs:
           cache: true
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned (not `latest`) so CI is reproducible and matches `make tools`.
+          version: v2.12.2
