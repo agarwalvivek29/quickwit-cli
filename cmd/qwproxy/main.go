@@ -43,7 +43,8 @@ func run(log *slog.Logger) error {
 	cfg := loadConfig()
 	log.Info("starting qwproxy",
 		"version", version, "commit", commit, "date", date,
-		"listen", cfg.listenAddr, "upstream", cfg.upstream, "issuer", cfg.oidcIssuer)
+		"listen", cfg.listenAddr, "upstream", cfg.upstream, "issuer", cfg.oidcIssuer,
+		"audit_max_conns", cfg.auditMaxConns)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -56,7 +57,13 @@ func run(log *slog.Logger) error {
 	// Audit store: connect, apply schema, ensure partitions.
 	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	sink, err := audit.NewPGXSink(initCtx, cfg.auditDSN)
+	sink, err := audit.NewPGXSink(initCtx, cfg.auditDSN, audit.PoolConfig{
+		MaxConns:          int32(cfg.auditMaxConns),
+		MinConns:          int32(cfg.auditMinConns),
+		MaxConnLifetime:   time.Duration(cfg.auditConnMaxLifetimeMS) * time.Millisecond,
+		MaxConnIdleTime:   time.Duration(cfg.auditConnMaxIdleMS) * time.Millisecond,
+		HealthCheckPeriod: time.Duration(cfg.auditHealthcheckMS) * time.Millisecond,
+	})
 	if err != nil {
 		return err
 	}
@@ -139,6 +146,14 @@ type config struct {
 	auditBatch      int
 	auditFlushMS    int
 	retentionMonths int
+
+	// Audit-store Postgres pool sizing. Bounds how many connections qwproxy
+	// opens against the audit DB so it cannot exhaust Postgres max_connections.
+	auditMaxConns          int
+	auditMinConns          int
+	auditConnMaxLifetimeMS int
+	auditConnMaxIdleMS     int
+	auditHealthcheckMS     int
 }
 
 func loadConfig() config {
@@ -152,6 +167,12 @@ func loadConfig() config {
 		auditBatch:      envInt("QWPROXY_AUDIT_BATCH", 100),
 		auditFlushMS:    envInt("QWPROXY_AUDIT_FLUSH_MS", 1000),
 		retentionMonths: envInt("QWPROXY_RETENTION_MONTHS", 12),
+
+		auditMaxConns:          envInt("QWPROXY_AUDIT_MAX_CONNS", 4),
+		auditMinConns:          envInt("QWPROXY_AUDIT_MIN_CONNS", 0),
+		auditConnMaxLifetimeMS: envInt("QWPROXY_AUDIT_CONN_MAX_LIFETIME_MS", 3600000),
+		auditConnMaxIdleMS:     envInt("QWPROXY_AUDIT_CONN_MAX_IDLE_MS", 300000),
+		auditHealthcheckMS:     envInt("QWPROXY_AUDIT_HEALTHCHECK_MS", 60000),
 	}
 }
 
