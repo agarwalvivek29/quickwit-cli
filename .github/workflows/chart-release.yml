@@ -1,0 +1,37 @@
+name: chart-release
+
+# Publishes the quickwit-proxy Helm chart to GHCR as an OCI artifact.
+#   push to main touching the chart -> oci://ghcr.io/<owner>/charts/quickwit-proxy:<Chart.version>
+#   manual dispatch                 -> same
+# The chart version comes from charts/quickwit-proxy/Chart.yaml (not the app tag).
+on:
+  push:
+    branches: [main]
+    paths: ["charts/quickwit-proxy/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.2"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Lint
+        run: helm lint charts/quickwit-proxy
+
+      - name: Package
+        run: helm package charts/quickwit-proxy -d dist
+
+      - name: Push
+        run: helm push dist/quickwit-proxy-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts

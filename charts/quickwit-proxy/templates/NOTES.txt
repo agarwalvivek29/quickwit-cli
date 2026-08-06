@@ -1,0 +1,28 @@
+quickwit-proxy (qwproxy) is deployed.
+
+Service:  {{ include "quickwit-proxy.fullname" . }}:{{ .Values.service.port }}
+Image:    {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+Upstream: {{ .Values.proxy.upstream }}
+Issuer:   {{ .Values.proxy.oidc.issuer }}
+
+The proxy is READ-ONLY: it forwards only Quickwit's version/indexes/search
+endpoints and rejects everything else. Every request is audited to Postgres
+(request envelope + query, never response bodies).
+
+{{- if .Values.ingress.enabled }}
+
+Reachable via Ingress:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ (first .paths).path }}
+{{- end }}
+{{- else }}
+
+Port-forward to try it locally:
+  kubectl port-forward svc/{{ include "quickwit-proxy.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  # health:  http://localhost:{{ .Values.service.port }}/health
+  # metrics: http://localhost:{{ .Values.service.port }}/metrics
+{{- end }}
+
+Point the qw CLI at this proxy:
+  qw context use <name>   # endpoint = the ingress host above
+  qw login && qw search <index> '<query>' --since 15m

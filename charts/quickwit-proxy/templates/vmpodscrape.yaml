@@ -1,0 +1,19 @@
+{{- if .Values.vmPodScrape.enabled }}
+# Scrape qwproxy's own /metrics into VictoriaMetrics. This cluster runs the VM
+# operator (not prometheus-operator) with vmagent selectAllByDefault=true, so a
+# VMPodScrape is auto-discovered. Metrics are on the http port at /metrics.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: {{ include "quickwit-proxy.fullname" . }}
+  labels:
+    {{- include "quickwit-proxy.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "quickwit-proxy.selectorLabels" . | nindent 6 }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.vmPodScrape.interval }}
+{{- end }}

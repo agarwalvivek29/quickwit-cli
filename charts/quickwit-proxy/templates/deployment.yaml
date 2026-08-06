@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "quickwit-proxy.fullname" . }}
+  labels:
+    {{- include "quickwit-proxy.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "quickwit-proxy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "quickwit-proxy.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "quickwit-proxy.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 9000
+              protocol: TCP
+          env:
+            - name: QWPROXY_LISTEN_ADDR
+              value: {{ .Values.proxy.listenAddr | quote }}
+            - name: QWPROXY_UPSTREAM
+              value: {{ required "proxy.upstream is required" .Values.proxy.upstream | quote }}
+            - name: QWPROXY_OIDC_ISSUER
+              value: {{ required "proxy.oidc.issuer is required" .Values.proxy.oidc.issuer | quote }}
+            - name: QWPROXY_OIDC_AUDIENCE
+              value: {{ .Values.proxy.oidc.audience | quote }}
+            - name: QWPROXY_RETENTION_MONTHS
+              value: {{ .Values.proxy.retentionMonths | quote }}
+            - name: QWPROXY_AUDIT_BUFFER
+              value: {{ .Values.proxy.audit.buffer | quote }}
+            - name: QWPROXY_AUDIT_BATCH
+              value: {{ .Values.proxy.audit.batch | quote }}
+            - name: QWPROXY_AUDIT_FLUSH_MS
+              value: {{ .Values.proxy.audit.flushMs | quote }}
+            - name: QWPROXY_AUDIT_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "quickwit-proxy.dsnSecretName" . }}
+                  key: {{ .Values.proxy.audit.dsnSecretKey }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
