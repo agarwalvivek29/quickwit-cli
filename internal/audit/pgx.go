@@ -13,14 +13,62 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
+// PoolConfig bounds the audit store's Postgres connection pool. The audit
+// writer is a single goroutine issuing serial batched inserts, so it needs very
+// few connections; capping the pool keeps qwproxy — especially when run as
+// several replicas — from exhausting Postgres's max_connections. A zero value
+// on any field falls back to a conservative default (see withDefaults); values
+// in the DSN (pool_max_conns, ...) are still honored, then overridden by any
+// field set here.
+type PoolConfig struct {
+	MaxConns          int32         // hard cap on open connections
+	MinConns          int32         // warm idle connections to keep (0 = none)
+	MaxConnLifetime   time.Duration // recycle a connection after this age
+	MaxConnIdleTime   time.Duration // close a connection idle this long
+	HealthCheckPeriod time.Duration // how often the pool prunes/checks conns
+}
+
+func (c PoolConfig) withDefaults() PoolConfig {
+	if c.MaxConns <= 0 {
+		c.MaxConns = 4
+	}
+	if c.MinConns < 0 {
+		c.MinConns = 0
+	}
+	if c.MaxConnLifetime <= 0 {
+		c.MaxConnLifetime = time.Hour
+	}
+	if c.MaxConnIdleTime <= 0 {
+		c.MaxConnIdleTime = 5 * time.Minute
+	}
+	if c.HealthCheckPeriod <= 0 {
+		c.HealthCheckPeriod = time.Minute
+	}
+	return c
+}
+
 // PGXSink writes audit records to Postgres via a pgxpool.
 type PGXSink struct {
 	pool *pgxpool.Pool
 }
 
-// NewPGXSink opens a pooled connection to dsn and returns a Sink.
-func NewPGXSink(ctx context.Context, dsn string) (*PGXSink, error) {
-	pool, err := pgxpool.New(ctx, dsn)
+// NewPGXSink opens a bounded, pooled connection to dsn and returns a Sink. The
+// pool is sized by pc (see PoolConfig) so the audit store never opens more
+// Postgres connections than intended.
+func NewPGXSink(ctx context.Context, dsn string, pc PoolConfig) (*PGXSink, error) {
+	pc = pc.withDefaults()
+
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse audit dsn: %w", err)
+	}
+	cfg.MaxConns = pc.MaxConns
+	cfg.MinConns = pc.MinConns
+	cfg.MaxConnLifetime = pc.MaxConnLifetime
+	cfg.MaxConnIdleTime = pc.MaxConnIdleTime
+	cfg.HealthCheckPeriod = pc.HealthCheckPeriod
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open audit pool: %w", err)
 	}
