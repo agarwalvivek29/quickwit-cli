@@ -33,9 +33,12 @@ fmt-check: ## Fail if code is not gofmt-clean
 lint: ## Run golangci-lint (install with `make tools`)
 	golangci-lint run
 
+GOLANGCI_VERSION ?= v2.12.2
+
 .PHONY: tools
-tools: ## Install dev tooling
-	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+tools: ## Install dev tooling (golangci-lint v2, matching CI)
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | \
+	  sh -s -- -b $(shell $(GO) env GOPATH)/bin $(GOLANGCI_VERSION)
 
 .PHONY: check
 check: fmt-check test ## The full pre-PR gate (CI runs this)

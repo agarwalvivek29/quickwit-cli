@@ -1,0 +1,17 @@
+# golangci-lint v2 configuration.
+# Pinned so `make lint` locally and the CI lint job run the identical linter set.
+version: "2"
+
+linters:
+  # The "standard" preset = errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  settings:
+    errcheck:
+      # Writes to the CLI's stdout/stderr streams (a.Out / a.Err / tabwriter)
+      # conventionally ignore their error — a failed terminal write is not
+      # actionable. This matches errcheck's own upstream default-exclude list
+      # and keeps the print-heavy command code free of `_ =` noise.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
