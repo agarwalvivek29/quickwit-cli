@@ -123,7 +123,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 func TestVerifierValidToken(t *testing.T) {
 	m := newMockOP(t)
 	ctx := context.Background()
-	v, err := NewVerifier(ctx, m.issuer, m.audience)
+	v, err := NewVerifier(ctx, m.issuer, m.audience, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestVerifierValidToken(t *testing.T) {
 func TestVerifierRejects(t *testing.T) {
 	m := newMockOP(t)
 	ctx := context.Background()
-	v, err := NewVerifier(ctx, m.issuer, m.audience)
+	v, err := NewVerifier(ctx, m.issuer, m.audience, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +172,55 @@ func TestVerifierRejects(t *testing.T) {
 			t.Error("expected error for wrong issuer")
 		}
 	})
+}
+
+// TestVerifierGatewayOverride reproduces an isolated network: the token's real
+// issuer host is unreachable, only an internal gateway can be reached, and the
+// gateway's discovery document advertises that unreachable issuer. Plain
+// discovery must fail on the issuer/URL mismatch; the DiscoveryURL+JWKSURL
+// override must adopt the advertised issuer and validate the token via the
+// gateway.
+func TestVerifierGatewayOverride(t *testing.T) {
+	m := newMockOP(t)
+	ctx := context.Background()
+	gateway := m.srv.URL // the only reachable endpoint (the internal proxy)
+	// Make the advertised issuer + minted `iss` a value that is NOT the URL the
+	// discovery doc is served from — exactly what a path/custom-domain issuer
+	// behind a proxy looks like.
+	m.issuer = "https://idp.unreachable.test"
+
+	// Plain discovery against the gateway fails: doc issuer != fetch URL.
+	if _, err := NewVerifier(ctx, gateway, m.audience, Options{}); err == nil {
+		t.Fatal("expected plain discovery to fail on issuer/URL mismatch")
+	}
+
+	// Override: fetch discovery + JWKS via the gateway, adopt the advertised
+	// issuer (leave issuer empty), and validate a token whose iss is unreachable.
+	v, err := NewVerifier(ctx, "", m.audience, Options{
+		DiscoveryURL: gateway,
+		JWKSURL:      gateway + "/jwks",
+	})
+	if err != nil {
+		t.Fatalf("gateway-override NewVerifier: %v", err)
+	}
+	claims, err := v.Verify(ctx, m.mint(t, m.audience, time.Now().Add(time.Hour), "user-123", "dev@example.com"))
+	if err != nil {
+		t.Fatalf("verify via gateway override: %v", err)
+	}
+	if claims.Subject != "user-123" || claims.Email != "dev@example.com" {
+		t.Errorf("claims = %+v", claims)
+	}
+
+	// A token from a different issuer must still be rejected under the override.
+	bad := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "https://someone.else.test", "sub": "u", "aud": m.audience,
+		"exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Unix(),
+	})
+	bad.Header["kid"] = m.kid
+	bs, _ := bad.SignedString(m.key)
+	if _, err := v.Verify(ctx, bs); err == nil {
+		t.Error("expected error for token from a different issuer")
+	}
 }
 
 func TestLoginPKCE(t *testing.T) {
