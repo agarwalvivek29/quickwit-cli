@@ -83,8 +83,13 @@ func run(log *slog.Logger) error {
 	})
 	writer.Start(ctx)
 
-	// OIDC verifier (discovery happens here).
-	verifier, err := oidc.NewVerifier(initCtx, cfg.oidcIssuer, cfg.oidcAudience)
+	// OIDC verifier (discovery happens here). DiscoveryURL/JWKSURL let a
+	// locked-down network reach the IdP through an internal gateway while still
+	// validating the real, unreachable issuer in the token's `iss` claim.
+	verifier, err := oidc.NewVerifier(initCtx, cfg.oidcIssuer, cfg.oidcAudience, oidc.Options{
+		DiscoveryURL: cfg.oidcDiscoveryURL,
+		JWKSURL:      cfg.oidcJWKSURL,
+	})
 	if err != nil {
 		return err
 	}
@@ -137,15 +142,17 @@ func run(log *slog.Logger) error {
 }
 
 type config struct {
-	listenAddr      string
-	upstream        string
-	oidcIssuer      string
-	oidcAudience    string
-	auditDSN        string
-	auditBuffer     int
-	auditBatch      int
-	auditFlushMS    int
-	retentionMonths int
+	listenAddr       string
+	upstream         string
+	oidcIssuer       string
+	oidcAudience     string
+	oidcDiscoveryURL string
+	oidcJWKSURL      string
+	auditDSN         string
+	auditBuffer      int
+	auditBatch       int
+	auditFlushMS     int
+	retentionMonths  int
 
 	// Audit-store Postgres pool sizing. Bounds how many connections qwproxy
 	// opens against the audit DB so it cannot exhaust Postgres max_connections.
@@ -158,15 +165,17 @@ type config struct {
 
 func loadConfig() config {
 	return config{
-		listenAddr:      env("QWPROXY_LISTEN_ADDR", ":9000"),
-		upstream:        env("QWPROXY_UPSTREAM", "http://localhost:7280"),
-		oidcIssuer:      env("QWPROXY_OIDC_ISSUER", ""),
-		oidcAudience:    env("QWPROXY_OIDC_AUDIENCE", ""),
-		auditDSN:        env("QWPROXY_AUDIT_DSN", ""),
-		auditBuffer:     envInt("QWPROXY_AUDIT_BUFFER", 4096),
-		auditBatch:      envInt("QWPROXY_AUDIT_BATCH", 100),
-		auditFlushMS:    envInt("QWPROXY_AUDIT_FLUSH_MS", 1000),
-		retentionMonths: envInt("QWPROXY_RETENTION_MONTHS", 12),
+		listenAddr:       env("QWPROXY_LISTEN_ADDR", ":9000"),
+		upstream:         env("QWPROXY_UPSTREAM", "http://localhost:7280"),
+		oidcIssuer:       env("QWPROXY_OIDC_ISSUER", ""),
+		oidcAudience:     env("QWPROXY_OIDC_AUDIENCE", ""),
+		oidcDiscoveryURL: env("QWPROXY_OIDC_DISCOVERY_URL", ""),
+		oidcJWKSURL:      env("QWPROXY_OIDC_JWKS_URL", ""),
+		auditDSN:         env("QWPROXY_AUDIT_DSN", ""),
+		auditBuffer:      envInt("QWPROXY_AUDIT_BUFFER", 4096),
+		auditBatch:       envInt("QWPROXY_AUDIT_BATCH", 100),
+		auditFlushMS:     envInt("QWPROXY_AUDIT_FLUSH_MS", 1000),
+		retentionMonths:  envInt("QWPROXY_RETENTION_MONTHS", 12),
 
 		auditMaxConns:          envInt("QWPROXY_AUDIT_MAX_CONNS", 4),
 		auditMinConns:          envInt("QWPROXY_AUDIT_MIN_CONNS", 0),
