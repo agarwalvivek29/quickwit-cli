@@ -283,6 +283,57 @@ func TestLoginDevice(t *testing.T) {
 	}
 }
 
+func TestIDTokenSourceSendsIDToken(t *testing.T) {
+	m := newMockOP(t)
+	ctx := context.Background()
+	a, err := New(ctx, ProviderConfig{Issuer: m.issuer, ClientID: m.clientID, Audience: m.audience})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A still-valid seed → no refresh; the bearer is the seeded ID token, NOT the
+	// access token.
+	seed := &Tokens{AccessToken: "access-1", IDToken: "id-1", Expiry: time.Now().Add(time.Hour)}
+	tok, err := a.IDTokenSource(ctx, seed, nil).Token()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.AccessToken != "id-1" {
+		t.Errorf("bearer = %q, want the ID token id-1", tok.AccessToken)
+	}
+}
+
+func TestIDTokenSourceRotatesOnRefresh(t *testing.T) {
+	m := newMockOP(t)
+	ctx := context.Background()
+	a, err := New(ctx, ProviderConfig{Issuer: m.issuer, ClientID: m.clientID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expired seed forces a refresh; the mock returns a fresh id_token (aud =
+	// clientID). The source must adopt it as the new bearer and persist it.
+	seed := &Tokens{AccessToken: "stale", RefreshToken: "refresh-abc", IDToken: "old-id", Expiry: time.Now().Add(-time.Hour)}
+	var saved *Tokens
+	tok, err := a.IDTokenSource(ctx, seed, func(nt *Tokens) { saved = nt }).Token()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.AccessToken == "old-id" || tok.AccessToken == "" {
+		t.Errorf("expected a rotated ID token, got %q", tok.AccessToken)
+	}
+	if saved == nil || saved.IDToken != tok.AccessToken {
+		t.Errorf("refresh was not persisted via save: %+v", saved)
+	}
+	// The rotated ID token must verify with aud == the client id — the exact
+	// check the proxy performs.
+	v, err := NewVerifier(ctx, m.issuer, m.clientID, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Verify(ctx, tok.AccessToken); err != nil {
+		t.Errorf("rotated ID token failed aud verification: %v", err)
+	}
+}
+
 func TestTokenSourcePersistsRefresh(t *testing.T) {
 	m := newMockOP(t)
 	ctx := context.Background()

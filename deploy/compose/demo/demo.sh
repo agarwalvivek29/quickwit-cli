@@ -14,7 +14,9 @@ until curl -sf "$PROXY/health" >/dev/null 2>&1; do sleep 2; done
 
 TOKRESP=$(curl -sf -XPOST "$KC/protocol/openid-connect/token" \
   -d grant_type=password -d client_id=qw-cli -d username=dev -d password=dev -d scope=openid)
-TOKEN=$(printf '%s' "$TOKRESP" | grep -o '"access_token":"[^"]*"' | sed 's/.*:"//; s/"$//')
+ACCESS=$(printf '%s' "$TOKRESP" | grep -o '"access_token":"[^"]*"' | sed 's/.*:"//; s/"$//')
+# The proxy verifies the ID token (aud = qw-cli); that is the bearer the CLI sends.
+TOKEN=$(printf '%s' "$TOKRESP" | grep -o '"id_token":"[^"]*"' | sed 's/.*:"//; s/"$//')
 
 cat >"$QW_CONFIG" <<YAML
 current-context: stage
@@ -26,7 +28,8 @@ contexts:
       issuer: ${KC}
       client-id: qw-cli
     auth:
-      access-token: "${TOKEN}"
+      access-token: "${ACCESS}"
+      id-token: "${TOKEN}"
       token-type: Bearer
 YAML
 

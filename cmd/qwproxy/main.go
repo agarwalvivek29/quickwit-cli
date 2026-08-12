@@ -41,10 +41,17 @@ func main() {
 
 func run(log *slog.Logger) error {
 	cfg := loadConfig()
+	if err := cfg.validate(); err != nil {
+		return err
+	}
 	log.Info("starting qwproxy",
 		"version", version, "commit", commit, "date", date,
 		"listen", cfg.listenAddr, "upstream", cfg.upstream, "issuer", cfg.oidcIssuer,
-		"audit_max_conns", cfg.auditMaxConns)
+		"audience", cfg.expectedAudience(), "audit_max_conns", cfg.auditMaxConns)
+	if cfg.expectedAudience() == "" {
+		log.Warn("QWPROXY_INSECURE_SKIP_AUDIENCE is set: accepting ANY token the issuer signs " +
+			"(any app, any env, any user in the org) — never use this in production")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -86,7 +93,7 @@ func run(log *slog.Logger) error {
 	// OIDC verifier (discovery happens here). DiscoveryURL/JWKSURL let a
 	// locked-down network reach the IdP through an internal gateway while still
 	// validating the real, unreachable issuer in the token's `iss` claim.
-	verifier, err := oidc.NewVerifier(initCtx, cfg.oidcIssuer, cfg.oidcAudience, oidc.Options{
+	verifier, err := oidc.NewVerifier(initCtx, cfg.oidcIssuer, cfg.expectedAudience(), oidc.Options{
 		DiscoveryURL: cfg.oidcDiscoveryURL,
 		JWKSURL:      cfg.oidcJWKSURL,
 	})
@@ -142,17 +149,26 @@ func run(log *slog.Logger) error {
 }
 
 type config struct {
-	listenAddr       string
-	upstream         string
-	oidcIssuer       string
-	oidcAudience     string
-	oidcDiscoveryURL string
-	oidcJWKSURL      string
-	auditDSN         string
-	auditBuffer      int
-	auditBatch       int
-	auditFlushMS     int
-	retentionMonths  int
+	listenAddr string
+	upstream   string
+	oidcIssuer string
+	// oidcClientID is this deployment's OIDC client id, enforced as the token
+	// `aud`. The CLI presents its ID token, whose aud is the client id — unique
+	// per app/env — so a token minted for one environment is rejected by another.
+	oidcClientID string
+	// oidcAudience is the legacy expected audience (an API audience on a custom
+	// authorization server). oidcClientID takes precedence; see expectedAudience.
+	oidcAudience string
+	// insecureSkipAudience disables the aud check entirely. Dev-only escape hatch;
+	// without it the proxy refuses to start when no audience is configured.
+	insecureSkipAudience bool
+	oidcDiscoveryURL     string
+	oidcJWKSURL          string
+	auditDSN             string
+	auditBuffer          int
+	auditBatch           int
+	auditFlushMS         int
+	retentionMonths      int
 
 	// Audit-store Postgres pool sizing. Bounds how many connections qwproxy
 	// opens against the audit DB so it cannot exhaust Postgres max_connections.
@@ -163,19 +179,47 @@ type config struct {
 	auditHealthcheckMS     int
 }
 
+// expectedAudience is the token `aud` the proxy enforces: this deployment's OIDC
+// client id (QWPROXY_OIDC_CLIENT_ID) — the aud carried by the CLI's ID token —
+// falling back to the legacy API audience (QWPROXY_OIDC_AUDIENCE). Empty means
+// no aud check (only valid together with insecureSkipAudience).
+func (c config) expectedAudience() string {
+	if c.oidcClientID != "" {
+		return c.oidcClientID
+	}
+	return c.oidcAudience
+}
+
+// validate refuses to start in a fail-open configuration. With no expected
+// audience the proxy would accept ANY token the issuer signed — any app, any
+// env, any user in the org — which is the "stage token replayed against prod"
+// hole. Empty audience is therefore a hard error unless the operator has
+// explicitly opted into the insecure dev mode.
+func (c config) validate() error {
+	if c.expectedAudience() == "" && !c.insecureSkipAudience {
+		return errors.New("refusing to start: no token audience configured. Set " +
+			"QWPROXY_OIDC_CLIENT_ID to this deployment's OIDC client id (the aud the CLI's ID " +
+			"token carries) so a token minted for another app/env is rejected; or, for local/dev " +
+			"only, set QWPROXY_INSECURE_SKIP_AUDIENCE=true to accept any issuer-signed token")
+	}
+	return nil
+}
+
 func loadConfig() config {
 	return config{
-		listenAddr:       env("QWPROXY_LISTEN_ADDR", ":9000"),
-		upstream:         env("QWPROXY_UPSTREAM", "http://localhost:7280"),
-		oidcIssuer:       env("QWPROXY_OIDC_ISSUER", ""),
-		oidcAudience:     env("QWPROXY_OIDC_AUDIENCE", ""),
-		oidcDiscoveryURL: env("QWPROXY_OIDC_DISCOVERY_URL", ""),
-		oidcJWKSURL:      env("QWPROXY_OIDC_JWKS_URL", ""),
-		auditDSN:         env("QWPROXY_AUDIT_DSN", ""),
-		auditBuffer:      envInt("QWPROXY_AUDIT_BUFFER", 4096),
-		auditBatch:       envInt("QWPROXY_AUDIT_BATCH", 100),
-		auditFlushMS:     envInt("QWPROXY_AUDIT_FLUSH_MS", 1000),
-		retentionMonths:  envInt("QWPROXY_RETENTION_MONTHS", 12),
+		listenAddr:           env("QWPROXY_LISTEN_ADDR", ":9000"),
+		upstream:             env("QWPROXY_UPSTREAM", "http://localhost:7280"),
+		oidcIssuer:           env("QWPROXY_OIDC_ISSUER", ""),
+		oidcClientID:         env("QWPROXY_OIDC_CLIENT_ID", ""),
+		oidcAudience:         env("QWPROXY_OIDC_AUDIENCE", ""),
+		insecureSkipAudience: envBool("QWPROXY_INSECURE_SKIP_AUDIENCE", false),
+		oidcDiscoveryURL:     env("QWPROXY_OIDC_DISCOVERY_URL", ""),
+		oidcJWKSURL:          env("QWPROXY_OIDC_JWKS_URL", ""),
+		auditDSN:             env("QWPROXY_AUDIT_DSN", ""),
+		auditBuffer:          envInt("QWPROXY_AUDIT_BUFFER", 4096),
+		auditBatch:           envInt("QWPROXY_AUDIT_BATCH", 100),
+		auditFlushMS:         envInt("QWPROXY_AUDIT_FLUSH_MS", 1000),
+		retentionMonths:      envInt("QWPROXY_RETENTION_MONTHS", 12),
 
 		auditMaxConns:          envInt("QWPROXY_AUDIT_MAX_CONNS", 4),
 		auditMinConns:          envInt("QWPROXY_AUDIT_MIN_CONNS", 0),
@@ -196,6 +240,15 @@ func envInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+func envBool(key string, def bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return def

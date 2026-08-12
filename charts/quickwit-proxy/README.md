@@ -18,11 +18,15 @@ helm install qwproxy oci://ghcr.io/agarwalvivek29/charts/quickwit-proxy \
 | Key | Description |
 |-----|-------------|
 | `proxy.upstream` | In-cluster Quickwit searcher REST URL (`:7280`). |
-| `proxy.oidc.issuer` | OIDC issuer whose access tokens are accepted. Discovery is `<issuer>/.well-known/openid-configuration`. |
+| `proxy.oidc.issuer` | OIDC issuer whose tokens are accepted. Discovery is `<issuer>/.well-known/openid-configuration`. |
+| `proxy.oidc.clientId` | This deployment's OIDC client id, enforced as the token `aud`. The CLI sends its ID token (aud = client id), so a token minted for another app/env is rejected. **Required** unless `insecureSkipAudience`. |
 | `proxy.audit.dsnSecretName` / `dsnSecretKey` | Secret holding the Postgres audit DSN (`QWPROXY_AUDIT_DSN`). Or set `externalSecret.enabled=true` to source it from a secret store. |
 
-`proxy.oidc.audience` is optional — leave empty to skip the audience check
-(issuer + JWT signature are still enforced).
+The proxy **refuses to start** unless it has an expected audience: set
+`proxy.oidc.clientId` (recommended — per-app/env isolation), or the legacy
+`proxy.oidc.audience` (an API audience on a custom authorization server), or,
+for local/dev only, `proxy.oidc.insecureSkipAudience=true` to accept any
+issuer-signed token. Issuer + RS256 JWT signature are always enforced.
 
 ## Image
 

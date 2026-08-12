@@ -267,6 +267,54 @@ func (a *Authenticator) TokenSource(ctx context.Context, prev *Tokens, save func
 	return &persistingSource{base: base, last: prev.AccessToken, save: save}
 }
 
+// IDTokenSource is like TokenSource, but the credential it emits carries the
+// OIDC ID token as the bearer instead of the access token. qwproxy verifies the
+// ID token's audience — which equals this app's client id, unique per app/env —
+// so a token minted for one environment (e.g. stage) is rejected by another
+// environment's proxy (prod). An org-authorization-server access token, by
+// contrast, carries aud = the org URL, identical for every app, and cannot give
+// that isolation. Refresh and persistence behave exactly as in TokenSource.
+func (a *Authenticator) IDTokenSource(ctx context.Context, prev *Tokens, save func(*Tokens)) oauth2.TokenSource {
+	base := a.conf.TokenSource(ctx, prev.oauth2Token())
+	return &idTokenSource{base: base, lastAccess: prev.AccessToken, idToken: prev.IDToken, save: save}
+}
+
+// idTokenSource wraps an access-token source and swaps in the ID token as the
+// bearer value. It watches the access token to detect a refresh (which carries a
+// fresh id_token in the token's Extra) and persists the rotated pair.
+type idTokenSource struct {
+	base       oauth2.TokenSource
+	lastAccess string
+	idToken    string
+	save       func(*Tokens)
+}
+
+func (s *idTokenSource) Token() (*oauth2.Token, error) {
+	tok, err := s.base.Token()
+	if err != nil {
+		return nil, err
+	}
+	// A refresh yields a new access token with a fresh id_token alongside it;
+	// adopt and persist it. When the seeded access token is still valid the base
+	// returns it unchanged (no Extra), so we keep the id token we were seeded with.
+	if tok.AccessToken != s.lastAccess {
+		s.lastAccess = tok.AccessToken
+		if id, ok := tok.Extra("id_token").(string); ok && id != "" {
+			s.idToken = id
+			if s.save != nil {
+				s.save(tokensFrom(tok))
+			}
+		}
+	}
+	if s.idToken == "" {
+		return nil, errors.New("no ID token available for this session; run `qw login` again " +
+			"(qwproxy verifies the ID token, whose audience is the app's client id)")
+	}
+	// Bearer = the ID token; keep the access token's expiry so the underlying
+	// reuse-source refreshes (and rotates the ID token) at the right moment.
+	return &oauth2.Token{AccessToken: s.idToken, TokenType: "Bearer", Expiry: tok.Expiry}, nil
+}
+
 type persistingSource struct {
 	base oauth2.TokenSource
 	last string
