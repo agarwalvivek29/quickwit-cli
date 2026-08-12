@@ -34,7 +34,8 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      # v7 is required for golangci-lint v2 (v6 only supports v1).
+      - uses: golangci/golangci-lint-action@v7
         with:
           # Pinned (not `latest`) so CI is reproducible and matches `make tools`.
           version: v2.12.2
