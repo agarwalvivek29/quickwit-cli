@@ -97,6 +97,8 @@ env var. Add `--debug`/`-v` to trace each HTTP request (the bearer is redacted).
 
 **Browser login redirect.** `qw login` uses a fixed loopback redirect, `http://127.0.0.1:8765/callback`, which must be registered as a Sign-in redirect URI on your OIDC app. It is deliberately a *fixed* port (not an ephemeral one, and not a wildcard) because providers such as Okta require the redirect URI — port included — to match exactly. Override it with `qw login --redirect-port <port>` (or `QW_REDIRECT_PORT`) and register the matching URI. Headless hosts skip redirects entirely with `qw login --device`. Confidential OIDC clients (e.g. an Okta "Web" app) additionally need their secret at token exchange — pass it via `--client-secret` / `QW_CLIENT_SECRET`.
 
+**Per-environment isolation (audience).** The proxy verifies each token's audience against **this deployment's OIDC client id** (`QWPROXY_OIDC_CLIENT_ID`) and **refuses to start without one** — set the legacy `QWPROXY_OIDC_AUDIENCE`, or the dev-only `QWPROXY_INSECURE_SKIP_AUDIENCE=true`, if you really mean to skip it. To match, `qw` sends its OIDC **ID token** as the bearer by default: an ID token's `aud` is the client id, unique per app/env, so a token minted for stage is rejected by the prod proxy (and vice versa). Point one context at a different env's proxy and its token is turned away at the door. A custom authorization server that already stamps a real API audience on its access tokens can opt back in per context with `oidc.bearer-token: access-token` (or `QW_BEARER_TOKEN=access-token`).
+
 ## Handy commands
 
 ```sh

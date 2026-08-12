@@ -24,10 +24,19 @@ proxy:
   # http://quickwit-system-searcher.quickwit-system.svc:7280
   upstream: ""
   oidc:
-    # REQUIRED: OIDC issuer whose access tokens are accepted (Okta in prod).
+    # REQUIRED: OIDC issuer whose tokens are accepted (Okta in prod).
     issuer: ""
-    # Optional expected audience; empty -> audience check skipped.
+    # REQUIRED (unless insecureSkipAudience): this deployment's OIDC client id.
+    # The CLI presents its ID token, whose aud is this client id; the proxy
+    # rejects any token with a different aud (e.g. a stage token at the prod
+    # proxy). Unique per app/env — this is the per-environment isolation lever.
+    clientId: ""
+    # Legacy: expected API audience for a custom authorization server that stamps
+    # aud on its access tokens. Prefer clientId on an Okta org AS / Keycloak.
     audience: ""
+    # Dev-only escape hatch: accept ANY token the issuer signs (no aud check).
+    # The proxy REFUSES TO START unless clientId, audience, or this is set.
+    insecureSkipAudience: false
   # Drop audit partitions older than this many months.
   retentionMonths: 12
   audit:

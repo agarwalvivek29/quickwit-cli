@@ -61,7 +61,9 @@ services:
       QWPROXY_LISTEN_ADDR: ":9000"
       QWPROXY_UPSTREAM: http://quickwit:7280
       QWPROXY_OIDC_ISSUER: http://keycloak:8080/realms/quickwit
-      QWPROXY_OIDC_AUDIENCE: "" # sim: skip aud check (prod sets the API audience)
+      # Enforce aud == the app's client id. The CLI sends its ID token (aud =
+      # qw-cli), so a token minted for any other client is rejected at the door.
+      QWPROXY_OIDC_CLIENT_ID: qw-cli
       QWPROXY_AUDIT_DSN: postgres://qwaudit:qwaudit@postgres:5432/qwaudit?sslmode=disable
     ports:
       - "9000:9000"

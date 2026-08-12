@@ -212,8 +212,36 @@ func (a *App) tokenSource(ctx context.Context, cctx *config.Context, cfg *config
 			// not break the command in flight.
 			_ = config.Save(path, cfg)
 		}
-		return auth.TokenSource(ctx, prev, save), nil
+		// By default present the ID token (aud = client id), which qwproxy
+		// verifies for per-env isolation. A context can opt back into the access
+		// token for a custom authorization server (see bearerPref).
+		if bearerPref(cctx) == bearerAccessToken {
+			return auth.TokenSource(ctx, prev, save), nil
+		}
+		return auth.IDTokenSource(ctx, prev, save), nil
 	}
+}
+
+const (
+	bearerIDToken     = "id-token"
+	bearerAccessToken = "access-token"
+)
+
+// bearerPref decides which token the CLI sends to qwproxy. The default is the ID
+// token: its aud is the app's client id, unique per app/env, so the proxy can
+// reject a token minted for a different environment. A context opts into the
+// access token with `oidc.bearer-token: access-token` — appropriate only for a
+// custom authorization server that stamps a real API audience on access tokens.
+// QW_BEARER_TOKEN overrides for the no-config path.
+func bearerPref(cctx *config.Context) string {
+	pref := cctx.OIDC.BearerToken
+	if v := envOr(config.EnvBearerToken); v != "" {
+		pref = v
+	}
+	if pref == bearerAccessToken {
+		return bearerAccessToken
+	}
+	return bearerIDToken
 }
 
 func tokensToConfig(t *oidc.Tokens) *config.AuthTokens {

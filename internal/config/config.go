@@ -30,6 +30,7 @@ const (
 	EnvClientID     = "QW_CLIENT_ID"
 	EnvIssuer       = "QW_ISSUER"
 	EnvAudience     = "QW_AUDIENCE"
+	EnvBearerToken  = "QW_BEARER_TOKEN"
 )
 
 // Config is the whole file.
@@ -52,10 +53,15 @@ type Context struct {
 // client-id are required; the same values map onto Keycloak (local sim) and
 // Okta (prod) unchanged.
 type OIDCConfig struct {
-	Issuer   string   `yaml:"issuer"`
-	ClientID string   `yaml:"client-id"`
-	Audience string   `yaml:"audience,omitempty"`
-	Scopes   []string `yaml:"scopes,omitempty"`
+	Issuer   string `yaml:"issuer"`
+	ClientID string `yaml:"client-id"`
+	Audience string `yaml:"audience,omitempty"`
+	// BearerToken selects which token the CLI presents to qwproxy: "id-token"
+	// (default) sends the OIDC ID token, whose aud is the client id the proxy
+	// verifies for per-env isolation; "access-token" sends the access token
+	// instead, for a custom authorization server that stamps a real API audience.
+	BearerToken string   `yaml:"bearer-token,omitempty"`
+	Scopes      []string `yaml:"scopes,omitempty"`
 }
 
 // AuthTokens is the cached token set for a context, written by `qw login`.

@@ -47,8 +47,12 @@ spec:
               value: {{ required "proxy.upstream is required" .Values.proxy.upstream | quote }}
             - name: QWPROXY_OIDC_ISSUER
               value: {{ required "proxy.oidc.issuer is required" .Values.proxy.oidc.issuer | quote }}
+            - name: QWPROXY_OIDC_CLIENT_ID
+              value: {{ .Values.proxy.oidc.clientId | quote }}
             - name: QWPROXY_OIDC_AUDIENCE
               value: {{ .Values.proxy.oidc.audience | quote }}
+            - name: QWPROXY_INSECURE_SKIP_AUDIENCE
+              value: {{ .Values.proxy.oidc.insecureSkipAudience | quote }}
             - name: QWPROXY_RETENTION_MONTHS
               value: {{ .Values.proxy.retentionMonths | quote }}
             - name: QWPROXY_AUDIT_BUFFER

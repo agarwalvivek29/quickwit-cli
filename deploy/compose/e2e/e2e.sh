@@ -17,12 +17,15 @@ until curl -sf "$KC/.well-known/openid-configuration" >/dev/null 2>&1; do sleep 
 echo "e2e: waiting for qwproxy ..."
 until curl -sf "$PROXY/health" >/dev/null 2>&1; do sleep 2; done
 
-echo "e2e: minting token (resource-owner password grant, sim only)"
+echo "e2e: minting tokens (resource-owner password grant, sim only)"
 TOKRESP=$(curl -sf -XPOST "$KC/protocol/openid-connect/token" \
   -d grant_type=password -d client_id=qw-cli \
   -d username=dev -d password=dev -d scope=openid) || fail "token request failed"
-TOKEN=$(printf '%s' "$TOKRESP" | grep -o '"access_token":"[^"]*"' | sed 's/.*:"//; s/"$//')
-[ -n "$TOKEN" ] || fail "no access_token in response"
+ACCESS=$(printf '%s' "$TOKRESP" | grep -o '"access_token":"[^"]*"' | sed 's/.*:"//; s/"$//')
+# The proxy verifies the ID token (aud = qw-cli, the client id); that is the
+# credential the CLI presents by default.
+TOKEN=$(printf '%s' "$TOKRESP" | grep -o '"id_token":"[^"]*"' | sed 's/.*:"//; s/"$//')
+[ -n "$TOKEN" ] || fail "no id_token in response"
 
 cat >"$CONFIG" <<YAML
 current-context: local
@@ -34,7 +37,8 @@ contexts:
       issuer: ${KC}
       client-id: qw-cli
     auth:
-      access-token: "${TOKEN}"
+      access-token: "${ACCESS}"
+      id-token: "${TOKEN}"
       token-type: Bearer
 YAML
 
