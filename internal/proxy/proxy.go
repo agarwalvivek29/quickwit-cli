@@ -27,6 +27,11 @@ import (
 // only guards against a pathological client.
 const maxQueryBody = 64 * 1024
 
+// maxMSearchBody caps how many bytes of an _msearch ndjson body we buffer for
+// the audit record. _msearch bundles several queries, so it gets more headroom
+// than a single search; the full body is still forwarded regardless.
+const maxMSearchBody = 256 * 1024
+
 // TokenVerifier validates a raw bearer token and returns its identity claims.
 // *oidc.Verifier satisfies this.
 type TokenVerifier interface {
@@ -90,9 +95,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Capture the search query body (only), re-attaching it for forwarding.
+	// Native /{index}/search bodies are a single JSON object; the ES-compat
+	// _msearch (used by the Grafana plugin) is ndjson, so it is captured as a
+	// JSON array and its index is read from the header lines rather than the path.
 	var queryBody []byte
-	if isSearch(r.Method, r.URL.Path) && r.Body != nil {
+	auditIndex := indexFromPath(r.URL.Path)
+	switch {
+	case isSearch(r.Method, r.URL.Path) && r.Body != nil:
 		queryBody = drainAndRestore(r, maxQueryBody)
+	case isMSearch(r.Method, r.URL.Path) && r.Body != nil:
+		queryBody, auditIndex = drainMSearch(r, maxMSearchBody)
 	}
 
 	// 4. Forward, recording status/latency/bytes.
@@ -111,7 +123,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		CLIVersion:     r.Header.Get("X-Qw-Cli-Version"),
 		Method:         r.Method,
 		Path:           r.URL.Path,
-		Index:          indexFromPath(r.URL.Path),
+		Index:          auditIndex,
 		QueryBody:      json.RawMessage(queryBody),
 		StatusCode:     rec.status,
 		LatencyMS:      latency.Milliseconds(),
@@ -136,6 +148,12 @@ var allowedRoutes = []route{
 	{http.MethodGet, regexp.MustCompile(`^/api/v1/indexes/[^/]+/describe$`)},
 	{http.MethodGet, regexp.MustCompile(`^/api/v1/[^/]+/search$`)},
 	{http.MethodPost, regexp.MustCompile(`^/api/v1/[^/]+/search$`)},
+	// Elasticsearch-compatible read surface used by the Grafana Quickwit
+	// datasource plugin (github.com/quickwit-oss/quickwit-datasource): _msearch
+	// for panel/Explore queries, _field_caps + _mapping for schema discovery.
+	{http.MethodPost, regexp.MustCompile(`^/api/v1/_elastic/_msearch$`)},
+	{http.MethodGet, regexp.MustCompile(`^/api/v1/_elastic/[^/]+/_field_caps$`)},
+	{http.MethodGet, regexp.MustCompile(`^/api/v1/_elastic/[^/]+/_mapping$`)},
 }
 
 func isAllowed(method, path string) bool {
@@ -151,6 +169,12 @@ var searchRe = regexp.MustCompile(`^/api/v1/([^/]+)/search$`)
 
 func isSearch(method, path string) bool {
 	return (method == http.MethodPost || method == http.MethodGet) && searchRe.MatchString(path)
+}
+
+// isMSearch matches the ES-compatible multi-search endpoint the Grafana plugin
+// uses. Its ndjson body carries the index in header lines, not the path.
+func isMSearch(method, path string) bool {
+	return method == http.MethodPost && path == "/api/v1/_elastic/_msearch"
 }
 
 // indexFromPath extracts the index segment for /search and /indexes/{id} paths.
@@ -196,6 +220,50 @@ func drainAndRestore(r *http.Request, limit int) []byte {
 		return nil
 	}
 	return captured
+}
+
+// drainMSearch reads an _msearch ndjson body (up to limit) for auditing and
+// restores r.Body so the proxy still forwards the full request. It returns the
+// non-empty JSON lines wrapped as a single JSON array (a valid jsonb value for
+// the audit store) and the first index found in a header line.
+func drainMSearch(r *http.Request, limit int) ([]byte, string) {
+	body, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if err != nil {
+		r.Body = io.NopCloser(bytes.NewReader(nil))
+		return nil, ""
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	captured := body
+	if len(captured) > limit {
+		captured = captured[:limit]
+	}
+	var lines []json.RawMessage
+	var index string
+	for _, line := range bytes.Split(captured, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 || !json.Valid(line) {
+			continue // skip blanks and a truncated final line
+		}
+		lines = append(lines, json.RawMessage(line))
+		if index == "" {
+			var hdr struct {
+				Index string `json:"index"`
+			}
+			if json.Unmarshal(line, &hdr) == nil && hdr.Index != "" {
+				index = hdr.Index
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return nil, index
+	}
+	out, err := json.Marshal(lines)
+	if err != nil {
+		return nil, index
+	}
+	return out, index
 }
 
 func clientIP(r *http.Request) string {
