@@ -18,6 +18,9 @@ All notable changes to this project are documented here. The format is based on
 - `internal/audit`: async, drop-on-full Postgres writer; monthly-partitioned schema with a 12-month retention window.
 - `internal/timeparse`: human time expressions (`15m`, RFC3339, epoch, `now`) to epoch seconds.
 - `qwproxy`: OIDC auth + read-only allowlist + streaming reverse proxy + request-envelope audit (never response bodies) + Prometheus metrics.
+- **qwproxy: Grafana Quickwit datasource support.** The read-only allowlist now also permits the Elasticsearch-compatible read surface the Grafana `quickwit-quickwit-datasource` plugin uses — `POST /api/v1/_elastic/_msearch`, `GET /api/v1/_elastic/{index}/_field_caps`, `GET /api/v1/_elastic/{index}/_mapping` — while ingest/write endpoints (e.g. `_bulk`) stay blocked.
+- **qwproxy: multi-audience.** `QWPROXY_OIDC_CLIENT_IDS` (comma-separated) / chart `proxy.oidc.clientIds` lets one proxy accept several client ids at once — e.g. the qw CLI plus a Grafana service identity — in addition to `QWPROXY_OIDC_CLIENT_ID`/`QWPROXY_OIDC_AUDIENCE`. Fail-closed behaviour is unchanged (at least one audience is still required to start).
+- **qwproxy: `_msearch` audit fidelity.** `_elastic/_msearch` requests are now audited with the queried index (read from the ndjson header lines) and the query body captured as a JSON array, matching the fidelity of native `/{index}/search`.
 - `qw`: `login`/`login --device`, `context create|list|use|current`, `indexes list|describe|fields`, `search`, `tail`, `count`, `histogram`, `whoami`, `ping`; `-o table|json|raw`, `--fields`, `--since/--from/--to`, level colorization, shell completion.
 - `deploy/compose`: local simulation stack (Keycloak + seeded Quickwit + Postgres + qwproxy) and an end-to-end smoke test.
 - `install.sh`: one-line installer for the `qw` binary (platform detection, checksum verification), served from the repo via `curl | sh`.
