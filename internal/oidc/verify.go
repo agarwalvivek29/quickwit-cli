@@ -15,6 +15,10 @@ import (
 // and cached + rotated by go-oidc), and issuer/expiry/audience are enforced.
 type Verifier struct {
 	verifier *coreoidc.IDTokenVerifier
+	// allowedAud is the set of accepted token audiences. A token is valid if its
+	// `aud` intersects this set. Empty means the audience check is skipped
+	// (signature + issuer + expiry are still enforced).
+	allowedAud []string
 }
 
 // Claims are the identity fields the proxy records for the audit trail.
@@ -48,17 +52,19 @@ type Options struct {
 	JWKSURL string
 }
 
-// NewVerifier returns a Verifier for issuer. If audience is non-empty it is
-// enforced as the expected "aud"; otherwise the audience check is skipped
-// (signature + issuer + expiry are always enforced).
+// NewVerifier returns a Verifier for issuer. If audiences is non-empty a token
+// is accepted only when its `aud` intersects that set; otherwise the audience
+// check is skipped (signature + issuer + expiry are always enforced).
+//
+// go-oidc's built-in check only compares a single client id, so we disable it
+// (SkipClientIDCheck) and enforce audience membership ourselves in Verify. This
+// lets one deployment accept several client ids at once — e.g. the qw CLI and a
+// Grafana service identity — which is how the proxy fronts multiple callers.
 //
 // With the zero Options it performs standard discovery against issuer. Set
 // opts.DiscoveryURL / opts.JWKSURL for gateway-only networks (see Options).
-func NewVerifier(ctx context.Context, issuer, audience string, opts Options) (*Verifier, error) {
-	cfg := &coreoidc.Config{ClientID: audience}
-	if audience == "" {
-		cfg.SkipClientIDCheck = true
-	}
+func NewVerifier(ctx context.Context, issuer string, audiences []string, opts Options) (*Verifier, error) {
+	cfg := &coreoidc.Config{SkipClientIDCheck: true}
 
 	// Explicit JWKS override: skip go-oidc discovery entirely. qwproxy is a
 	// resource server (it only validates bearer tokens), so it needs just the
@@ -78,7 +84,7 @@ func NewVerifier(ctx context.Context, issuer, audience string, opts Options) (*V
 			expected = iss
 		}
 		ks := coreoidc.NewRemoteKeySet(ctx, opts.JWKSURL)
-		return &Verifier{verifier: coreoidc.NewVerifier(expected, ks, cfg)}, nil
+		return &Verifier{verifier: coreoidc.NewVerifier(expected, ks, cfg), allowedAud: audiences}, nil
 	}
 
 	// Discovery path. When DiscoveryURL differs from the issuer, fetch discovery
@@ -98,7 +104,19 @@ func NewVerifier(ctx context.Context, issuer, audience string, opts Options) (*V
 	if err != nil {
 		return nil, fmt.Errorf("oidc discovery for %s: %w", discoURL, err)
 	}
-	return &Verifier{verifier: provider.Verifier(cfg)}, nil
+	return &Verifier{verifier: provider.Verifier(cfg), allowedAud: audiences}, nil
+}
+
+// audienceAllowed reports whether any of the token's audiences is in allowed.
+func audienceAllowed(tokenAud, allowed []string) bool {
+	for _, a := range tokenAud {
+		for _, w := range allowed {
+			if a == w {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // discoverIssuer fetches only the `issuer` field from the OIDC discovery
@@ -137,6 +155,9 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (*Claims, error)
 	tok, err := v.verifier.Verify(ctx, rawToken)
 	if err != nil {
 		return nil, err
+	}
+	if len(v.allowedAud) > 0 && !audienceAllowed(tok.Audience, v.allowedAud) {
+		return nil, fmt.Errorf("oidc: token audience %v not in accepted set", tok.Audience)
 	}
 	var extra struct {
 		Email             string `json:"email"`

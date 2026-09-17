@@ -120,10 +120,30 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// A proxy fronting several callers (e.g. the qw CLI and a Grafana service
+// identity) accepts a token whose aud matches ANY configured client id, and
+// rejects one that matches none.
+func TestVerifierAcceptsMultipleAudiences(t *testing.T) {
+	m := newMockOP(t)
+	ctx := context.Background()
+	v, err := NewVerifier(ctx, m.issuer, []string{"qw-cli", "grafana"}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, aud := range []string{"qw-cli", "grafana"} {
+		if _, err := v.Verify(ctx, m.mint(t, aud, time.Now().Add(time.Hour), "u", "e")); err != nil {
+			t.Errorf("aud %q should be accepted, got %v", aud, err)
+		}
+	}
+	if _, err := v.Verify(ctx, m.mint(t, "someone-else", time.Now().Add(time.Hour), "u", "e")); err == nil {
+		t.Error("aud not in the configured set must be rejected")
+	}
+}
+
 func TestVerifierValidToken(t *testing.T) {
 	m := newMockOP(t)
 	ctx := context.Background()
-	v, err := NewVerifier(ctx, m.issuer, m.audience, Options{})
+	v, err := NewVerifier(ctx, m.issuer, []string{m.audience}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +159,7 @@ func TestVerifierValidToken(t *testing.T) {
 func TestVerifierRejects(t *testing.T) {
 	m := newMockOP(t)
 	ctx := context.Background()
-	v, err := NewVerifier(ctx, m.issuer, m.audience, Options{})
+	v, err := NewVerifier(ctx, m.issuer, []string{m.audience}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,13 +210,13 @@ func TestVerifierGatewayOverride(t *testing.T) {
 	m.issuer = "https://idp.unreachable.test"
 
 	// Plain discovery against the gateway fails: doc issuer != fetch URL.
-	if _, err := NewVerifier(ctx, gateway, m.audience, Options{}); err == nil {
+	if _, err := NewVerifier(ctx, gateway, []string{m.audience}, Options{}); err == nil {
 		t.Fatal("expected plain discovery to fail on issuer/URL mismatch")
 	}
 
 	// Override: fetch discovery + JWKS via the gateway, adopt the advertised
 	// issuer (leave issuer empty), and validate a token whose iss is unreachable.
-	v, err := NewVerifier(ctx, "", m.audience, Options{
+	v, err := NewVerifier(ctx, "", []string{m.audience}, Options{
 		DiscoveryURL: gateway,
 		JWKSURL:      gateway + "/jwks",
 	})
@@ -325,7 +345,7 @@ func TestIDTokenSourceRotatesOnRefresh(t *testing.T) {
 	}
 	// The rotated ID token must verify with aud == the client id — the exact
 	// check the proxy performs.
-	v, err := NewVerifier(ctx, m.issuer, m.clientID, Options{})
+	v, err := NewVerifier(ctx, m.issuer, []string{m.clientID}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

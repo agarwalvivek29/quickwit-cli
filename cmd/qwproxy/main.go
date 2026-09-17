@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -47,8 +48,8 @@ func run(log *slog.Logger) error {
 	log.Info("starting qwproxy",
 		"version", version, "commit", commit, "date", date,
 		"listen", cfg.listenAddr, "upstream", cfg.upstream, "issuer", cfg.oidcIssuer,
-		"audience", cfg.expectedAudience(), "audit_max_conns", cfg.auditMaxConns)
-	if cfg.expectedAudience() == "" {
+		"audiences", cfg.expectedAudiences(), "audit_max_conns", cfg.auditMaxConns)
+	if len(cfg.expectedAudiences()) == 0 {
 		log.Warn("QWPROXY_INSECURE_SKIP_AUDIENCE is set: accepting ANY token the issuer signs " +
 			"(any app, any env, any user in the org) — never use this in production")
 	}
@@ -93,7 +94,7 @@ func run(log *slog.Logger) error {
 	// OIDC verifier (discovery happens here). DiscoveryURL/JWKSURL let a
 	// locked-down network reach the IdP through an internal gateway while still
 	// validating the real, unreachable issuer in the token's `iss` claim.
-	verifier, err := oidc.NewVerifier(initCtx, cfg.oidcIssuer, cfg.expectedAudience(), oidc.Options{
+	verifier, err := oidc.NewVerifier(initCtx, cfg.oidcIssuer, cfg.expectedAudiences(), oidc.Options{
 		DiscoveryURL: cfg.oidcDiscoveryURL,
 		JWKSURL:      cfg.oidcJWKSURL,
 	})
@@ -156,6 +157,11 @@ type config struct {
 	// `aud`. The CLI presents its ID token, whose aud is the client id — unique
 	// per app/env — so a token minted for one environment is rejected by another.
 	oidcClientID string
+	// oidcClientIDs is an optional additional set of accepted client ids (aud),
+	// so one deployment can front several callers — e.g. the qw CLI plus a
+	// Grafana service identity. Any token whose aud matches one of these (or
+	// oidcClientID / oidcAudience) is accepted.
+	oidcClientIDs []string
 	// oidcAudience is the legacy expected audience (an API audience on a custom
 	// authorization server). oidcClientID takes precedence; see expectedAudience.
 	oidcAudience string
@@ -179,15 +185,26 @@ type config struct {
 	auditHealthcheckMS     int
 }
 
-// expectedAudience is the token `aud` the proxy enforces: this deployment's OIDC
-// client id (QWPROXY_OIDC_CLIENT_ID) — the aud carried by the CLI's ID token —
-// falling back to the legacy API audience (QWPROXY_OIDC_AUDIENCE). Empty means
-// no aud check (only valid together with insecureSkipAudience).
-func (c config) expectedAudience() string {
-	if c.oidcClientID != "" {
-		return c.oidcClientID
+// expectedAudiences is the set of token `aud` values the proxy accepts: the
+// deployment's OIDC client id(s) (QWPROXY_OIDC_CLIENT_ID + QWPROXY_OIDC_CLIENT_IDS)
+// — the aud carried by each caller's ID token — plus the legacy API audience
+// (QWPROXY_OIDC_AUDIENCE). Empty means no aud check (only valid together with
+// insecureSkipAudience).
+func (c config) expectedAudiences() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(s string) {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
 	}
-	return c.oidcAudience
+	add(c.oidcClientID)
+	for _, id := range c.oidcClientIDs {
+		add(id)
+	}
+	add(c.oidcAudience)
+	return out
 }
 
 // validate refuses to start in a fail-open configuration. With no expected
@@ -196,7 +213,7 @@ func (c config) expectedAudience() string {
 // hole. Empty audience is therefore a hard error unless the operator has
 // explicitly opted into the insecure dev mode.
 func (c config) validate() error {
-	if c.expectedAudience() == "" && !c.insecureSkipAudience {
+	if len(c.expectedAudiences()) == 0 && !c.insecureSkipAudience {
 		return errors.New("refusing to start: no token audience configured. Set " +
 			"QWPROXY_OIDC_CLIENT_ID to this deployment's OIDC client id (the aud the CLI's ID " +
 			"token carries) so a token minted for another app/env is rejected; or, for local/dev " +
@@ -211,6 +228,7 @@ func loadConfig() config {
 		upstream:             env("QWPROXY_UPSTREAM", "http://localhost:7280"),
 		oidcIssuer:           env("QWPROXY_OIDC_ISSUER", ""),
 		oidcClientID:         env("QWPROXY_OIDC_CLIENT_ID", ""),
+		oidcClientIDs:        envList("QWPROXY_OIDC_CLIENT_IDS"),
 		oidcAudience:         env("QWPROXY_OIDC_AUDIENCE", ""),
 		insecureSkipAudience: envBool("QWPROXY_INSECURE_SKIP_AUDIENCE", false),
 		oidcDiscoveryURL:     env("QWPROXY_OIDC_DISCOVERY_URL", ""),
@@ -234,6 +252,21 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envList parses a comma-separated env var into a trimmed, non-empty slice.
+func envList(key string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func envInt(key string, def int) int {

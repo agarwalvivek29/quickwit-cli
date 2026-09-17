@@ -31,6 +31,11 @@ proxy:
     # rejects any token with a different aud (e.g. a stage token at the prod
     # proxy). Unique per app/env — this is the per-environment isolation lever.
     clientId: ""
+    # Optional additional accepted client ids (audiences), so one proxy can front
+    # several callers — e.g. the qw CLI plus a Grafana service identity. A token
+    # is accepted when its aud matches clientId OR any of these OR audience.
+    # Empty (default) keeps single-audience behaviour.
+    clientIds: []
     # Legacy: expected API audience for a custom authorization server that stamps
     # aud on its access tokens. Prefer clientId on an Okta org AS / Keycloak.
     audience: ""

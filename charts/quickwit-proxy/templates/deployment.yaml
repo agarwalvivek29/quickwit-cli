@@ -49,6 +49,10 @@ spec:
               value: {{ required "proxy.oidc.issuer is required" .Values.proxy.oidc.issuer | quote }}
             - name: QWPROXY_OIDC_CLIENT_ID
               value: {{ .Values.proxy.oidc.clientId | quote }}
+            {{- with .Values.proxy.oidc.clientIds }}
+            - name: QWPROXY_OIDC_CLIENT_IDS
+              value: {{ join "," . | quote }}
+            {{- end }}
             - name: QWPROXY_OIDC_AUDIENCE
               value: {{ .Values.proxy.oidc.audience | quote }}
             - name: QWPROXY_INSECURE_SKIP_AUDIENCE
