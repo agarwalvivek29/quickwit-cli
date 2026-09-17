@@ -90,7 +90,7 @@ func TestProxyEnforcesAudience(t *testing.T) {
 	ctx := context.Background()
 	const thisApp = "qw-prod"
 
-	v, err := oidc.NewVerifier(ctx, op.issuer, thisApp, oidc.Options{})
+	v, err := oidc.NewVerifier(ctx, op.issuer, []string{thisApp}, oidc.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
