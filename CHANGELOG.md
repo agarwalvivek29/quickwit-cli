@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-17
+
 ### Security
 - **qwproxy enforces the token audience and fails closed.** Previously an empty `QWPROXY_OIDC_AUDIENCE` skipped the audience check, so *any* token the issuer signed — any app, any env, any user in the org — was accepted (the "stage token replayed against prod" hole). The proxy now **refuses to start** unless it has an expected audience: set `QWPROXY_OIDC_CLIENT_ID` to the deployment's OIDC client id (recommended), the legacy `QWPROXY_OIDC_AUDIENCE` (a custom-AS API audience), or the explicit dev-only escape hatch `QWPROXY_INSECURE_SKIP_AUDIENCE=true`.
 - **The CLI now presents its OIDC ID token** (not the access token) as the bearer by default. An ID token's `aud` is the app's client id — unique per app/env — so the proxy's `aud` check gives real per-environment isolation (a token minted for one env is rejected by another env's proxy), which an org-authorization-server access token (`aud` = the org URL, identical for every app) cannot. Opt back into the access token per context with `oidc.bearer-token: access-token` / `QW_BEARER_TOKEN` for a custom authorization server. Added an integration test that presents a wrong-`aud` token and asserts 401.

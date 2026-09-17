@@ -4,8 +4,8 @@ description: Auth (OIDC) + audit reverse proxy in front of Quickwit's read API. 
 type: application
 # First-party chart for qwproxy (github.com/agarwalvivek29/quickwit-cli).
 # Bump appVersion to the published qwproxy image tag on each release.
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.4.0
+appVersion: "0.4.0"
 home: https://github.com/agarwalvivek29/quickwit-cli
 sources:
   - https://github.com/agarwalvivek29/quickwit-cli
