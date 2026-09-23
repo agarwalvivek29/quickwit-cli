@@ -18,6 +18,7 @@ type Record struct {
 	Ts             time.Time
 	PrincipalSub   string
 	PrincipalEmail string
+	AuthMethod     string // "oidc" | "api-key"
 	ClientIP       string
 	UserAgent      string
 	CLIVersion     string

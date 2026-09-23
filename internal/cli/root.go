@@ -34,6 +34,9 @@ func NewRootCmd() *cobra.Command {
 			if app.ClientSecret == "" {
 				app.ClientSecret = os.Getenv(config.EnvClientSecret)
 			}
+			if app.APIKey == "" {
+				app.APIKey = os.Getenv(config.EnvAPIKey)
+			}
 			switch app.Output {
 			case outTable, outJSON, outRaw:
 			default:
@@ -57,9 +60,11 @@ func NewRootCmd() *cobra.Command {
 	pf.StringVar(&app.Endpoint, "endpoint", "", "endpoint base URL, overriding the context (env QW_ENDPOINT)")
 	pf.StringVar(&app.Token, "token", "", "static bearer token; skips OIDC (env QW_TOKEN)")
 	pf.StringVar(&app.ClientSecret, "client-secret", "", "OIDC client-credentials secret for CI/cron (env QW_CLIENT_SECRET)")
+	pf.StringVar(&app.APIKey, "api-key", "", "qwproxy API key to present (X-API-Key); overrides the stored key (env QW_API_KEY)")
 
 	root.AddCommand(
 		newLoginCmd(app),
+		newAPIKeyCmd(app),
 		newContextCmd(app),
 		newConfigCmd(app),
 		newIndexesCmd(app),
@@ -69,6 +74,7 @@ func NewRootCmd() *cobra.Command {
 		newHistogramCmd(app),
 		newWhoamiCmd(app),
 		newPingCmd(app),
+		newUpgradeCmd(app),
 		newVersionCmd(app),
 	)
 	return root

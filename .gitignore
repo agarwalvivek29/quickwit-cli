@@ -27,3 +27,6 @@ coverage.*
 
 # Local data volumes from docker-compose
 deploy/compose/.data/
+
+.sessions/
+.claude/

@@ -82,10 +82,36 @@ export QW_CLIENT_SECRET=...            # keep in a secret store, not a flag
 qw count core-logs 'status:[500 TO 599]' --since 1d
 ```
 
-Precedence: `QW_TOKEN` → `QW_CLIENT_SECRET` → cached `qw login` tokens. Flags
-(`--endpoint`, `--token`, `--client-secret`, `--context`) override the matching
-env var. Add `--debug`/`-v` to trace each HTTP request (the bearer is redacted).
-`--jq '<expr>'` filters JSON output with a built-in jq engine (no `jq` binary needed).
+Precedence: `QW_TOKEN` → stored API key (see below) → `QW_CLIENT_SECRET` → cached
+`qw login` tokens. Flags (`--endpoint`, `--token`, `--client-secret`, `--api-key`,
+`--context`) override the matching env var. Add `--debug`/`-v` to trace each HTTP
+request (the bearer and API key are redacted). `--jq '<expr>'` filters JSON output
+with a built-in jq engine (no `jq` binary needed).
+
+## API keys (long-lived, no OIDC to use)
+
+To give a developer or agent read access **without an interactive OIDC login every
+time**, mint a long-lived API key. You log in once with OIDC to prove you're a
+legitimate user; the key it mints is then presented in an `X-API-Key` header and
+the proxy authorizes it by a local lookup — no OIDC validation on that path.
+
+```sh
+qw login                       # OIDC, once — proves you're you
+qw apikey create --ttl-days 30 # mint a key (max 30d); saved to the current context
+qw search core-logs 'level:ERROR' --since 1h   # now authenticates with the key
+
+qw apikey list                 # your keys: id, prefix, expiry, last-used, status
+qw apikey revoke <id>          # kill a key immediately
+```
+
+`create` saves the key straight into your context's `auth:` block, so subsequent
+commands use it automatically — no env var to set. To hand the key to someone else
+(CI, a container), copy it from the `create` output (shown once) and set
+`QW_API_KEY` there, or pass `--api-key`. Keys are stored on the server as a
+SHA-256 hash only, are capped at 30 days (`QWPROXY_APIKEY_MAX_TTL_DAYS`), and every
+call they make is attributed to you in the audit trail. Server-side the feature is
+enabled automatically when the proxy has a database (it reuses the audit DSN, or
+set `QWPROXY_APIKEY_DSN`); the `qw_api_keys` table self-applies at startup.
 
 ## Configuration
 
@@ -103,6 +129,9 @@ env var. Add `--debug`/`-v` to trace each HTTP request (the bearer is redacted).
 
 ```sh
 qw version -o json                 # build info, scriptable
+qw apikey create --ttl-days 30     # mint a long-lived key (see API keys above)
+qw upgrade --check                 # is my CLI in sync with this context's server?
+qw upgrade                         # install the version the context's server runs
 qw config path                     # where is my config file?
 qw config view                     # dump it (tokens redacted; --raw to reveal)
 qw config edit                     # open it in $EDITOR

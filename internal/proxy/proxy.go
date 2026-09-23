@@ -32,10 +32,23 @@ const maxQueryBody = 64 * 1024
 // than a single search; the full body is still forwarded regardless.
 const maxMSearchBody = 256 * 1024
 
+// apiKeyHeader carries an API key instead of an OIDC bearer token. When present
+// it takes precedence over Authorization and is authorized by a local hash
+// lookup — no OIDC validation.
+const apiKeyHeader = "X-API-Key"
+
 // TokenVerifier validates a raw bearer token and returns its identity claims.
 // *oidc.Verifier satisfies this.
 type TokenVerifier interface {
 	Verify(ctx context.Context, rawToken string) (*oidc.Claims, error)
+}
+
+// APIKeyAuthenticator validates a raw API key and returns the creator's identity
+// claims (for the audit trail), or an error if the key is not currently valid.
+// *apikey.Store satisfies this. It is optional: a nil Options.APIKeys disables
+// API-key auth entirely.
+type APIKeyAuthenticator interface {
+	Authenticate(ctx context.Context, rawKey string) (*oidc.Claims, error)
 }
 
 // AuditLogger enqueues an audit record without blocking. *audit.Writer
@@ -48,6 +61,7 @@ type AuditLogger interface {
 type Options struct {
 	Upstream *url.URL
 	Verifier TokenVerifier
+	APIKeys  APIKeyAuthenticator // optional; nil disables X-API-Key auth
 	Audit    AuditLogger
 	Metrics  *Metrics // optional; nil disables metrics
 	Now      func() time.Time
@@ -74,18 +88,11 @@ func New(opts Options) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// 1. Authenticate.
-	raw, ok := bearerToken(r)
+	// 1. Authenticate: an X-API-Key wins (local hash lookup, no OIDC); otherwise
+	//    fall back to the OIDC bearer token.
+	claims, authMethod, ok := h.authenticate(w, r)
 	if !ok {
-		h.metricAuthFail()
-		writeJSONError(w, http.StatusUnauthorized, "missing bearer token")
-		return
-	}
-	claims, err := h.opts.Verifier.Verify(r.Context(), raw)
-	if err != nil {
-		h.metricAuthFail()
-		writeJSONError(w, http.StatusUnauthorized, "invalid token: "+err.Error())
-		return
+		return // authenticate already wrote the 401 + counted the failure
 	}
 
 	// 2. Enforce the read-only allowlist.
@@ -118,6 +125,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Ts:             start,
 		PrincipalSub:   claims.Subject,
 		PrincipalEmail: claims.Email,
+		AuthMethod:     authMethod,
 		ClientIP:       clientIP(r),
 		UserAgent:      r.UserAgent(),
 		CLIVersion:     r.Header.Get("X-Qw-Cli-Version"),
@@ -130,6 +138,43 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		BytesOut:       rec.bytes,
 	})
 	h.metricRequest(r.Method, rec.status, latency)
+}
+
+// authenticate resolves the caller's identity. An X-API-Key header takes
+// precedence and is validated by a local hash lookup (no OIDC); otherwise the
+// Authorization bearer is validated as an OIDC token. On failure it writes the
+// 401, counts the metric, and returns ok=false. The returned string records
+// which method succeeded ("api-key" | "oidc") for the audit trail.
+func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (*oidc.Claims, string, bool) {
+	if key := r.Header.Get(apiKeyHeader); key != "" {
+		if h.opts.APIKeys == nil {
+			h.metricAuthFail()
+			writeJSONError(w, http.StatusUnauthorized, "api key authentication is not enabled")
+			return nil, "", false
+		}
+		claims, err := h.opts.APIKeys.Authenticate(r.Context(), key)
+		if err != nil {
+			h.metricAuthFail()
+			// Undifferentiated on purpose: never leak unknown vs expired vs revoked.
+			writeJSONError(w, http.StatusUnauthorized, "invalid api key")
+			return nil, "", false
+		}
+		return claims, "api-key", true
+	}
+
+	raw, ok := bearerToken(r)
+	if !ok {
+		h.metricAuthFail()
+		writeJSONError(w, http.StatusUnauthorized, "missing credentials (Authorization bearer or X-API-Key)")
+		return nil, "", false
+	}
+	claims, err := h.opts.Verifier.Verify(r.Context(), raw)
+	if err != nil {
+		h.metricAuthFail()
+		writeJSONError(w, http.StatusUnauthorized, "invalid token: "+err.Error())
+		return nil, "", false
+	}
+	return claims, "oidc", true
 }
 
 // --- allowlist ---------------------------------------------------------------
