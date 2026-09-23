@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **`qw apikey revoke` now works behind a path-strict gateway.** Revoke used `DELETE /qwproxy/apikeys/{id}`; a fronting gateway (e.g. Kong on envoy-prod/ssfb) that routes the base `/qwproxy/apikeys` but not sub-paths returned 404, so the key was never revoked. The CLI now revokes via `DELETE /qwproxy/apikeys?id=<id>` — the same base path as create/list — and the proxy accepts the id from either the query param or the `/{id}` path (backward compatible). No gateway route change needed.
+
 ## [0.5.0] - 2026-09-23
 
 ### Added

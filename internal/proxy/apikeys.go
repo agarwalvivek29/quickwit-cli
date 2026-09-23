@@ -85,15 +85,27 @@ func (h *APIKeyAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := strings.TrimPrefix(r.URL.Path, BasePath)
-	id = strings.TrimPrefix(id, "/")
+	pathID := strings.TrimPrefix(r.URL.Path, BasePath)
+	pathID = strings.TrimPrefix(pathID, "/")
 
 	switch {
-	case r.Method == http.MethodPost && id == "":
+	case r.Method == http.MethodPost && pathID == "":
 		h.create(w, r, claims)
-	case r.Method == http.MethodGet && id == "":
+	case r.Method == http.MethodGet && pathID == "":
 		h.list(w, r, claims)
-	case r.Method == http.MethodDelete && id != "":
+	case r.Method == http.MethodDelete:
+		// Revoke takes the id either as a path segment (/qwproxy/apikeys/{id}) or
+		// as a query param on the base path (/qwproxy/apikeys?id={id}). The query
+		// form keeps revoke on the SAME base path as create/list, so it works
+		// behind a gateway (e.g. Kong) that routes the base path but not sub-paths.
+		id := pathID
+		if id == "" {
+			id = r.URL.Query().Get("id")
+		}
+		if id == "" {
+			writeJSONError(w, http.StatusBadRequest, "missing api key id (use /qwproxy/apikeys/{id} or ?id=<id>)")
+			return
+		}
 		h.revoke(w, r, claims, id)
 	default:
 		writeJSONError(w, http.StatusNotFound, "no such api key endpoint")

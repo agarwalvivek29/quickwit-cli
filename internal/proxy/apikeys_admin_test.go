@@ -142,3 +142,27 @@ func TestAdminRevokeUnknownIs404(t *testing.T) {
 		t.Fatalf("status = %d, want 404", w.Code)
 	}
 }
+
+// Revoke on the base path via ?id= must work too — this is the form the CLI uses
+// so it survives a gateway that routes the base path but not sub-paths.
+func TestAdminRevokeViaQueryParam(t *testing.T) {
+	svc := &stubKeySvc{}
+	w := adminReq(newAdmin(svc), http.MethodDelete, BasePath+"?id=id-99", "good", "", "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", w.Code, w.Body.String())
+	}
+	if svc.revokedID != "id-99" || svc.revokedSub != "u1" {
+		t.Errorf("revoke got id=%q sub=%q, want id-99/u1", svc.revokedID, svc.revokedSub)
+	}
+}
+
+func TestAdminRevokeMissingIdIs400(t *testing.T) {
+	svc := &stubKeySvc{}
+	w := adminReq(newAdmin(svc), http.MethodDelete, BasePath, "good", "", "")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	if svc.revokedID != "" {
+		t.Error("revoke must not be called without an id")
+	}
+}
