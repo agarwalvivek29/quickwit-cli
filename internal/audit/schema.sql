@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS qw_audit (
     ts              timestamptz NOT NULL DEFAULT now(),
     principal_sub   text,
     principal_email text,
+    auth_method     text,
     client_ip       inet,
     user_agent      text,
     cli_version     text,
@@ -26,6 +27,10 @@ CREATE TABLE IF NOT EXISTS qw_audit (
 ) PARTITION BY RANGE (ts);
 
 CREATE TABLE IF NOT EXISTS qw_audit_default PARTITION OF qw_audit DEFAULT;
+
+-- Evolve an already-deployed table: how the request authenticated (oidc|api-key).
+-- Idempotent, applied at startup by EnsureSchema, so upgrades need no manual step.
+ALTER TABLE qw_audit ADD COLUMN IF NOT EXISTS auth_method text;
 
 -- Common lookups: recent activity, and "who searched what".
 CREATE INDEX IF NOT EXISTS qw_audit_ts_idx ON qw_audit (ts DESC);

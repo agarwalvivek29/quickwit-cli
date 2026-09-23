@@ -80,4 +80,48 @@ echo "e2e: proxy reports audited writes"
 curl -sf "$PROXY/metrics" | grep '^qwproxy_audit_written_total' | grep -qv ' 0$' \
   || fail "no audit writes recorded in metrics"
 
+# --- qw upgrade: discover the version the context's server runs ----------------
+echo "e2e: /health advertises a version"
+curl -sf "$PROXY/health" | grep -q '"version"' || fail "/health has no version field"
+
+echo "e2e: qw upgrade --check reads the context server version"
+/tmp/qw upgrade --check 2>&1 | grep -q 'server)' || fail "upgrade --check did not read the server version"
+
+# --- API keys: OIDC mint -> keyless (X-API-Key) use -> revoke ------------------
+echo "e2e: apikey create (mint with OIDC)"
+CREATE=$(/tmp/qw apikey create --ttl-days 7 --description e2e) || fail "apikey create failed"
+KEY=$(printf '%s' "$CREATE" | grep -o 'qw_pat_[0-9a-f]\{64\}' | head -1)
+KID=$(printf '%s' "$CREATE" | sed -n 's/^  id:[[:space:]]*//p')
+[ -n "$KEY" ] || fail "no api key in create output"
+[ -n "$KID" ] || fail "no key id in create output"
+
+echo "e2e: negative — a key cannot mint a key (401)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$PROXY/qwproxy/apikeys" -H "X-API-Key: $KEY" --data '{}')
+[ "$code" = "401" ] || fail "mint with X-API-Key returned $code, want 401"
+
+echo "e2e: search with X-API-Key works with NO OIDC token (200)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$PROXY/api/v1/core-logs/search" \
+  -H "X-API-Key: $KEY" -H 'content-type: application/json' --data '{"query":"*","max_hits":1}')
+[ "$code" = "200" ] || fail "X-API-Key search returned $code, want 200"
+
+echo "e2e: allowlist still enforced for a key — ingest blocked (403)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$PROXY/api/v1/core-logs/ingest" \
+  -H "X-API-Key: $KEY" --data '{}')
+[ "$code" = "403" ] || fail "ingest with key returned $code, want 403"
+
+echo "e2e: create saved the key to the context; qw now uses it (X-API-Key)"
+grep -q 'api-key:' "$CONFIG" || fail "create did not save the key to the context config"
+/tmp/qw indexes list | grep -q core-logs || fail "index list via stored api key failed"
+
+echo "e2e: qw apikey list shows the key"
+/tmp/qw apikey list | grep -q "$KID" || fail "apikey list missing $KID"
+
+echo "e2e: qw apikey revoke"
+/tmp/qw apikey revoke "$KID" || fail "apikey revoke failed"
+
+echo "e2e: revoked key is rejected (401)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$PROXY/api/v1/core-logs/search" \
+  -H "X-API-Key: $KEY" -H 'content-type: application/json' --data '{"query":"*","max_hits":1}')
+[ "$code" = "401" ] || fail "revoked key returned $code, want 401"
+
 echo "E2E OK"

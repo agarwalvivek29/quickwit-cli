@@ -119,15 +119,15 @@ func (s *PGXSink) EnsurePartitions(ctx context.Context, now time.Time, retention
 // InsertBatch inserts recs in a single pipelined batch.
 func (s *PGXSink) InsertBatch(ctx context.Context, recs []Record) error {
 	const q = `INSERT INTO qw_audit
-		(ts, principal_sub, principal_email, client_ip, user_agent, cli_version,
+		(ts, principal_sub, principal_email, auth_method, client_ip, user_agent, cli_version,
 		 method, path, index, query_body, status_code, latency_ms, bytes_out)
-		VALUES ($1,$2,$3,$4::inet,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)`
+		VALUES ($1,$2,$3,$4,$5::inet,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14)`
 
 	batch := &pgx.Batch{}
 	for _, r := range recs {
 		batch.Queue(q,
 			r.Ts,
-			nilStr(r.PrincipalSub), nilStr(r.PrincipalEmail),
+			nilStr(r.PrincipalSub), nilStr(r.PrincipalEmail), nilStr(r.AuthMethod),
 			nilStr(r.ClientIP), nilStr(r.UserAgent), nilStr(r.CLIVersion),
 			nilStr(r.Method), nilStr(r.Path), nilStr(r.Index),
 			nilBytes(r.QueryBody),

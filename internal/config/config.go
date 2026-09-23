@@ -31,6 +31,9 @@ const (
 	EnvIssuer       = "QW_ISSUER"
 	EnvAudience     = "QW_AUDIENCE"
 	EnvBearerToken  = "QW_BEARER_TOKEN"
+	// EnvAPIKey is an optional override for the stored context API key — mainly for
+	// CI. The normal path is `qw apikey create`, which saves the key to the context.
+	EnvAPIKey = "QW_API_KEY"
 )
 
 // Config is the whole file.
@@ -71,6 +74,11 @@ type AuthTokens struct {
 	IDToken      string    `yaml:"id-token,omitempty"`
 	TokenType    string    `yaml:"token-type,omitempty"`
 	Expiry       time.Time `yaml:"expiry,omitempty"`
+	// APIKey is a long-lived qwproxy key minted by `qw apikey create`. When set
+	// (and unexpired) the CLI presents it in the X-API-Key header instead of an
+	// OIDC bearer, so no login/refresh is needed until it expires.
+	APIKey       string    `yaml:"api-key,omitempty"`
+	APIKeyExpiry time.Time `yaml:"api-key-expiry,omitempty"`
 }
 
 // ErrNoContext is returned when no context can be resolved.

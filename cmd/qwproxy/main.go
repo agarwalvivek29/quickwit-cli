@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/agarwalvivek29/quickwit-cli/internal/apikey"
 	"github.com/agarwalvivek29/quickwit-cli/internal/audit"
 	"github.com/agarwalvivek29/quickwit-cli/internal/oidc"
 	"github.com/agarwalvivek29/quickwit-cli/internal/proxy"
@@ -102,22 +104,61 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	// API-key store: long-lived keys minted by an OIDC-authenticated user, then
+	// authorized by local hash lookup with no OIDC round trip. Enabled whenever a
+	// DSN is available (defaults to the audit DSN); the schema self-applies at
+	// startup, so a deploy needs no manual migration.
+	var keyStore *apikey.Store
+	if dsn := cfg.apikeyDSN(); dsn != "" {
+		keyStore, err = apikey.NewPGXStore(initCtx, dsn)
+		if err != nil {
+			return err
+		}
+		defer keyStore.Close()
+		if err := keyStore.EnsureSchema(initCtx); err != nil {
+			return err
+		}
+		log.Info("api-key auth enabled", "max_ttl_days", cfg.apikeyMaxTTLDays)
+	} else {
+		log.Warn("api-key auth disabled: no audit/api-key DSN configured")
+	}
+
 	reg := prometheus.NewRegistry()
 	metrics := proxy.NewMetrics(reg, writer)
 
-	handler := proxy.New(proxy.Options{
+	opts := proxy.Options{
 		Upstream: upstreamURL,
 		Verifier: verifier,
 		Audit:    writer,
 		Metrics:  metrics,
-	})
+	}
+	if keyStore != nil {
+		opts.APIKeys = keyStore
+	}
+	handler := proxy.New(opts)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		// version lets `qw upgrade` discover what this context is running so it can
+		// install a matching CLI. commit/date are informational.
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "ok",
+			"version": version,
+			"commit":  commit,
+			"date":    date,
+		})
 	})
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	// Proxy-native key management (OIDC-only). Mounted before the catch-all so it
+	// is never forwarded to Quickwit. Both the bare path and the /{id} form route
+	// to the same handler.
+	if keyStore != nil {
+		admin := proxy.NewAPIKeyAdmin(keyStore, verifier,
+			time.Duration(cfg.apikeyMaxTTLDays)*24*time.Hour)
+		mux.Handle(proxy.BasePath, admin)
+		mux.Handle(proxy.BasePath+"/", admin)
+	}
 	mux.Handle("/", handler)
 
 	srv := &http.Server{
@@ -171,10 +212,14 @@ type config struct {
 	oidcDiscoveryURL     string
 	oidcJWKSURL          string
 	auditDSN             string
-	auditBuffer          int
-	auditBatch           int
-	auditFlushMS         int
-	retentionMonths      int
+	// apiKeyDSN is the Postgres DSN for the API-key store; empty falls back to
+	// auditDSN (they normally share one database). Empty overall disables keys.
+	apiKeyDSN        string
+	apikeyMaxTTLDays int
+	auditBuffer      int
+	auditBatch       int
+	auditFlushMS     int
+	retentionMonths  int
 
 	// Audit-store Postgres pool sizing. Bounds how many connections qwproxy
 	// opens against the audit DB so it cannot exhaust Postgres max_connections.
@@ -183,6 +228,15 @@ type config struct {
 	auditConnMaxLifetimeMS int
 	auditConnMaxIdleMS     int
 	auditHealthcheckMS     int
+}
+
+// apikeyDSN is the DSN for the API-key store, defaulting to the audit DSN so a
+// single Postgres serves both. Empty means API-key auth is disabled.
+func (c config) apikeyDSN() string {
+	if c.apiKeyDSN != "" {
+		return c.apiKeyDSN
+	}
+	return c.auditDSN
 }
 
 // expectedAudiences is the set of token `aud` values the proxy accepts: the
@@ -234,6 +288,8 @@ func loadConfig() config {
 		oidcDiscoveryURL:     env("QWPROXY_OIDC_DISCOVERY_URL", ""),
 		oidcJWKSURL:          env("QWPROXY_OIDC_JWKS_URL", ""),
 		auditDSN:             env("QWPROXY_AUDIT_DSN", ""),
+		apiKeyDSN:            env("QWPROXY_APIKEY_DSN", ""),
+		apikeyMaxTTLDays:     envInt("QWPROXY_APIKEY_MAX_TTL_DAYS", 30),
 		auditBuffer:          envInt("QWPROXY_AUDIT_BUFFER", 4096),
 		auditBatch:           envInt("QWPROXY_AUDIT_BATCH", 100),
 		auditFlushMS:         envInt("QWPROXY_AUDIT_FLUSH_MS", 1000),

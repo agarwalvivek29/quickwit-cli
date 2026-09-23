@@ -54,6 +54,7 @@ type App struct {
 	Endpoint     string // overrides the context endpoint
 	Token        string // static bearer token (skips OIDC)
 	ClientSecret string // OIDC client-credentials secret (mint+refresh)
+	APIKey       string // qwproxy API key override (X-API-Key); usually from config
 
 	Out io.Writer
 	Err io.Writer
@@ -132,19 +133,51 @@ func (a *App) resolveEffectiveContext() (*config.Context, *config.Config, string
 }
 
 // authedClient builds a Quickwit client for the selected context whose HTTP
-// transport injects the bearer token. The credential is resolved by
-// tokenSource (static token, client-credentials, or cached login tokens).
+// transport injects the credential — a stored API key (X-API-Key) if one applies,
+// otherwise the bearer token resolved by tokenSource.
 func (a *App) authedClient(ctx context.Context) (*qw.Client, *config.Context, error) {
 	cctx, cfg, path, err := a.resolveEffectiveContext()
 	if err != nil {
 		return nil, nil, err
 	}
-
-	ts, err := a.tokenSource(ctx, cctx, cfg, path)
+	hc, err := a.httpClient(ctx, cctx, cfg, path, false)
 	if err != nil {
 		return nil, nil, err
 	}
+	client := qw.New(a.endpointFor(cctx), qw.WithHTTPClient(hc), qw.WithUserAgent("qw/"+version))
+	return client, cctx, nil
+}
 
+// endpointFor returns the endpoint to call for cctx, honoring --endpoint /
+// QW_ENDPOINT without rewriting the config file.
+func (a *App) endpointFor(cctx *config.Context) string {
+	if a.Endpoint != "" {
+		return a.Endpoint
+	}
+	return cctx.Endpoint
+}
+
+// httpClient builds the authenticated HTTP client for cctx. Unless forceOIDC is
+// set (or --token is given), a stored, unexpired API key selects X-API-Key mode,
+// which bypasses OIDC entirely; otherwise the OIDC / static-token / client-
+// credentials token source is used. The version header (and, with --debug, the
+// request tracer) wrap whichever transport is chosen.
+func (a *App) httpClient(ctx context.Context, cctx *config.Context, cfg *config.Config, path string, forceOIDC bool) (*http.Client, error) {
+	if !forceOIDC && a.Token == "" {
+		if key := a.resolveAPIKey(cctx); key != "" {
+			base := http.DefaultTransport
+			if a.Debug {
+				base = &debugRT{base: base, w: a.Err}
+			}
+			rt := &versionHeaderRT{base: &apiKeyHeaderRT{key: key, base: base}}
+			return &http.Client{Transport: rt}, nil
+		}
+	}
+
+	ts, err := a.tokenSource(ctx, cctx, cfg, path)
+	if err != nil {
+		return nil, err
+	}
 	hc := oauth2.NewClient(ctx, ts)
 	// Insert the debug tracer beneath oauth2's auth transport so it sees the
 	// final request (with the bearer attached, which it then redacts).
@@ -158,16 +191,26 @@ func (a *App) authedClient(ctx context.Context) (*qw.Client, *config.Context, er
 		}
 	}
 	hc.Transport = &versionHeaderRT{base: hc.Transport}
+	return hc, nil
+}
 
-	// --endpoint / QW_ENDPOINT overrides the context's endpoint for this call
-	// without rewriting the config file.
-	endpoint := cctx.Endpoint
-	if a.Endpoint != "" {
-		endpoint = a.Endpoint
+// resolveAPIKey returns the API key to present for cctx, or "" if none applies.
+// Precedence: --api-key / QW_API_KEY, then the stored context key. A stored key
+// that has expired is ignored (with a warning) so the CLI falls back to OIDC.
+func (a *App) resolveAPIKey(cctx *config.Context) string {
+	if a.APIKey != "" {
+		return a.APIKey
 	}
-
-	client := qw.New(endpoint, qw.WithHTTPClient(hc), qw.WithUserAgent("qw/"+version))
-	return client, cctx, nil
+	if cctx.Auth == nil || cctx.Auth.APIKey == "" {
+		return ""
+	}
+	if !cctx.Auth.APIKeyExpiry.IsZero() && !cctx.Auth.APIKeyExpiry.After(time.Now()) {
+		fmt.Fprintf(a.Err, "warning: stored API key for context %q expired %s; "+
+			"falling back to OIDC (run `qw apikey create`)\n",
+			cctx.Name, cctx.Auth.APIKeyExpiry.Format(time.RFC3339))
+		return ""
+	}
+	return cctx.Auth.APIKey
 }
 
 // tokenSource picks the credential for cctx, in precedence order:
@@ -254,6 +297,27 @@ func tokensToConfig(t *oidc.Tokens) *config.AuthTokens {
 	}
 }
 
+// apiKeyHeader carries a qwproxy API key. Must match the proxy's header name.
+const apiKeyHeader = "X-API-Key"
+
+// apiKeyHeaderRT injects the API key into every request (X-API-Key) and, unlike
+// the oauth2 transport, attaches no Authorization header — the key is the whole
+// credential.
+type apiKeyHeaderRT struct {
+	key  string
+	base http.RoundTripper
+}
+
+func (rt *apiKeyHeaderRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	base := rt.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	r2 := r.Clone(r.Context())
+	r2.Header.Set(apiKeyHeader, rt.key)
+	return base.RoundTrip(r2)
+}
+
 // versionHeaderRT stamps the CLI version onto every request so the proxy can
 // record it in the audit trail.
 type versionHeaderRT struct{ base http.RoundTripper }
@@ -283,6 +347,9 @@ func (rt *debugRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	fmt.Fprintf(rt.w, "> %s %s\n", r.Method, r.URL)
 	if r.Header.Get("Authorization") != "" {
 		fmt.Fprintln(rt.w, "> authorization: Bearer [redacted]")
+	}
+	if r.Header.Get(apiKeyHeader) != "" {
+		fmt.Fprintln(rt.w, "> x-api-key: [redacted]")
 	}
 	start := time.Now()
 	resp, err := base.RoundTrip(r)
