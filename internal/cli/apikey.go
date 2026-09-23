@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"text/tabwriter"
 	"time"
 
@@ -192,7 +193,11 @@ func (a *App) apiKeyList(ctx context.Context) error {
 }
 
 func (a *App) apiKeyRevoke(ctx context.Context, id string) error {
-	if err := a.adminRequest(ctx, http.MethodDelete, apiKeysPath+"/"+id, nil, nil); err != nil {
+	// Use the ?id= query form (not a /{id} path segment) so revoke stays on the
+	// same base path as create/list — that path is what a fronting gateway (e.g.
+	// Kong) routes; a sub-path may not be.
+	path := apiKeysPath + "?id=" + url.QueryEscape(id)
+	if err := a.adminRequest(ctx, http.MethodDelete, path, nil, nil); err != nil {
 		return err
 	}
 	fmt.Fprintf(a.Out, "revoked api key %s\n", id)

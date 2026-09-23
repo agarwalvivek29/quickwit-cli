@@ -130,3 +130,28 @@ func TestAPIKeyCreateSavesToConfig(t *testing.T) {
 		t.Fatalf("config was not updated with the minted key: %+v", cctx.Auth)
 	}
 }
+
+// Revoke must target the base path with ?id= (not /qwproxy/apikeys/{id}), so it
+// works behind a gateway that only routes the base path.
+func TestAPIKeyRevokeUsesBasePathQuery(t *testing.T) {
+	var gotMethod, gotPath, gotID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotID = r.Method, r.URL.Path, r.URL.Query().Get("id")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	path := configWith(t, srv.URL, "", time.Time{})
+	if _, _, err := runCmd(t, "--config", path, "--token", "tok", "apikey", "revoke", "abc-123"); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Errorf("method = %q, want DELETE", gotMethod)
+	}
+	if gotPath != "/qwproxy/apikeys" {
+		t.Errorf("path = %q, want /qwproxy/apikeys (base path, no sub-path)", gotPath)
+	}
+	if gotID != "abc-123" {
+		t.Errorf("id query = %q, want abc-123", gotID)
+	}
+}
