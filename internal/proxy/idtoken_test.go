@@ -61,3 +61,49 @@ func TestIDTokenFallback(t *testing.T) {
 		})
 	}
 }
+
+// Grafana's background init call carries only the datasource's X-API-Key, while
+// user queries carry the key plus the user's tokens; the user must win.
+func TestUserTokenPreferredOverAPIKey(t *testing.T) {
+	cases := []struct {
+		name, bearer, idToken, key string
+		wantCode                   int
+		wantMethod, wantSub        string
+	}{
+		{"key + valid id token", "org-access-token", "good", "valid-key", http.StatusOK, "oidc-id-token", "u1"},
+		{"key + valid bearer", "good", "", "valid-key", http.StatusOK, "oidc", "u1"},
+		{"key only (grafana init)", "", "", "valid-key", http.StatusOK, "api-key", "svc1"},
+		{"key + rejected tokens", "org-access-token", "bad", "valid-key", http.StatusOK, "api-key", "svc1"},
+		{"invalid key + rejected tokens", "org-access-token", "bad", "nope", http.StatusUnauthorized, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			up := newUpstream(t)
+			ca := &capAudit{}
+			h := handlerWithKeys(t, up, ca, stubKeyAuth{})
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/version", nil)
+			if tc.bearer != "" {
+				r.Header.Set("Authorization", "Bearer "+tc.bearer)
+			}
+			if tc.idToken != "" {
+				r.Header.Set(idTokenHeader, tc.idToken)
+			}
+			r.Header.Set(apiKeyHeader, tc.key)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != tc.wantCode {
+				t.Fatalf("code = %d, want %d", w.Code, tc.wantCode)
+			}
+			if tc.wantCode != http.StatusOK {
+				if up.hits != 0 {
+					t.Error("upstream hit with rejected credentials")
+				}
+				return
+			}
+			rec, _ := ca.last()
+			if rec.AuthMethod != tc.wantMethod || rec.PrincipalSub != tc.wantSub {
+				t.Errorf("audit = (%q, %q), want (%q, %q)", rec.AuthMethod, rec.PrincipalSub, tc.wantMethod, tc.wantSub)
+			}
+		})
+	}
+}
