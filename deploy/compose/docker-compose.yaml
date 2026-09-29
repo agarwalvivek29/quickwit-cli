@@ -64,6 +64,8 @@ services:
       # Enforce aud == the app's client id. The CLI sends its ID token (aud =
       # qw-cli), so a token minted for any other client is rejected at the door.
       QWPROXY_OIDC_CLIENT_ID: qw-cli
+      # Grafana's ID token arrives in X-ID-Token (aud = grafana).
+      QWPROXY_OIDC_CLIENT_IDS: grafana
       QWPROXY_AUDIT_DSN: postgres://qwaudit:qwaudit@postgres:5432/qwaudit?sslmode=disable
     ports:
       - "9000:9000"
@@ -72,6 +74,39 @@ services:
         condition: service_healthy
     # keycloak/quickwit may still be starting; retry until discovery + DB are up.
     restart: on-failure
+
+  # Grafana + Quickwit datasource reading through qwproxy with oauthPassThru
+  # (profile-gated; run via `make e2e-grafana`).
+  grafana:
+    image: grafana/grafana:13.1.0
+    environment:
+      GF_SERVER_ROOT_URL: http://grafana:3000
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: quickwit-quickwit-datasource
+      GF_PLUGINS_PREINSTALL_SYNC: quickwit-quickwit-datasource@0.6.3
+      GF_AUTH_GENERIC_OAUTH_ENABLED: "true"
+      GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP: "true"
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: grafana
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: grafana-secret
+      GF_AUTH_GENERIC_OAUTH_USE_PKCE: "true"
+      GF_AUTH_GENERIC_OAUTH_SCOPES: openid email profile
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: http://keycloak:8080/realms/quickwit/protocol/openid-connect/auth
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: http://keycloak:8080/realms/quickwit/protocol/openid-connect/token
+      GF_AUTH_GENERIC_OAUTH_API_URL: http://keycloak:8080/realms/quickwit/protocol/openid-connect/userinfo
+    ports:
+      - "3000:3000"
+    profiles: ["grafana"]
+    depends_on:
+      - qwproxy
+
+  # Drives a real Grafana OAuth login and a datasource query through qwproxy.
+  e2e-grafana:
+    image: alpine:3.20
+    entrypoint: ["sh", "/e2e/e2e-grafana.sh"]
+    volumes:
+      - ./e2e:/e2e:ro
+    profiles: ["grafana-tools"]
+    depends_on:
+      - grafana
 
   # One-shot: create the sample index and ingest recent logs, then exit.
   seed:

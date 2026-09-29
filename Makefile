@@ -69,6 +69,11 @@ e2e: ## Bring up the stack and run the end-to-end smoke test
 	$(COMPOSE) exec -T postgres psql -U qwaudit -d qwaudit -tAc \
 	  "select count(*) as rows, coalesce(max(index),'-') as last_index from qw_audit;"
 
+.PHONY: e2e-grafana
+e2e-grafana: ## Real Grafana (oauthPassThru) -> qwproxy -> Quickwit, asserts ID-token auth
+	$(COMPOSE) --profile grafana up -d --build
+	$(COMPOSE) --profile grafana --profile grafana-tools run --rm e2e-grafana
+
 .PHONY: demo
 demo: ## Run the narrated CLI-through-proxy walkthrough (see docs/EXAMPLES.md)
 	$(COMPOSE) up -d --build

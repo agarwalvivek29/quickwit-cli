@@ -32,10 +32,14 @@ const maxQueryBody = 64 * 1024
 // than a single search; the full body is still forwarded regardless.
 const maxMSearchBody = 256 * 1024
 
-// apiKeyHeader carries an API key instead of an OIDC bearer token. When present
-// it takes precedence over Authorization and is authorized by a local hash
-// lookup — no OIDC validation.
+// apiKeyHeader carries an API key, authorized by a local hash lookup with no
+// OIDC validation. It is the fallback when no valid user token is present.
 const apiKeyHeader = "X-API-Key"
+
+// idTokenHeader is where Grafana's oauthPassThru forwards the user's ID token.
+// Its Authorization bearer is the access token, whose org-server aud is the
+// org URL, so only the ID token carries Grafana's client id as aud.
+const idTokenHeader = "X-ID-Token"
 
 // TokenVerifier validates a raw bearer token and returns its identity claims.
 // *oidc.Verifier satisfies this.
@@ -88,8 +92,7 @@ func New(opts Options) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// 1. Authenticate: an X-API-Key wins (local hash lookup, no OIDC); otherwise
-	//    fall back to the OIDC bearer token.
+	// 1. Authenticate: a valid user OIDC token wins; X-API-Key is the fallback.
 	claims, authMethod, ok := h.authenticate(w, r)
 	if !ok {
 		return // authenticate already wrote the 401 + counted the failure
@@ -140,41 +143,54 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.metricRequest(r.Method, rec.status, latency)
 }
 
-// authenticate resolves the caller's identity. An X-API-Key header takes
-// precedence and is validated by a local hash lookup (no OIDC); otherwise the
-// Authorization bearer is validated as an OIDC token. On failure it writes the
-// 401, counts the metric, and returns ok=false. The returned string records
-// which method succeeded ("api-key" | "oidc") for the audit trail.
+// authenticate resolves the caller's identity, preferring a user's OIDC token
+// over an API key so a request carrying both is attributed to the user. The
+// Authorization bearer is tried first, then X-ID-Token, then X-API-Key (a local
+// hash lookup, no OIDC). On failure it writes the 401, counts the metric, and
+// returns ok=false. The returned string records which method succeeded
+// ("oidc" | "oidc-id-token" | "api-key") for the audit trail.
 func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (*oidc.Claims, string, bool) {
-	if key := r.Header.Get(apiKeyHeader); key != "" {
-		if h.opts.APIKeys == nil {
-			h.metricAuthFail()
-			writeJSONError(w, http.StatusUnauthorized, "api key authentication is not enabled")
-			return nil, "", false
-		}
-		claims, err := h.opts.APIKeys.Authenticate(r.Context(), key)
-		if err != nil {
-			h.metricAuthFail()
-			// Undifferentiated on purpose: never leak unknown vs expired vs revoked.
-			writeJSONError(w, http.StatusUnauthorized, "invalid api key")
-			return nil, "", false
-		}
-		return claims, "api-key", true
-	}
-
-	raw, ok := bearerToken(r)
-	if !ok {
+	raw, hasBearer := bearerToken(r)
+	idToken := r.Header.Get(idTokenHeader)
+	key := r.Header.Get(apiKeyHeader)
+	if !hasBearer && idToken == "" && key == "" {
 		h.metricAuthFail()
 		writeJSONError(w, http.StatusUnauthorized, "missing credentials (Authorization bearer or X-API-Key)")
 		return nil, "", false
 	}
-	claims, err := h.opts.Verifier.Verify(r.Context(), raw)
-	if err != nil {
+
+	var err error
+	if hasBearer {
+		var claims *oidc.Claims
+		if claims, err = h.opts.Verifier.Verify(r.Context(), raw); err == nil {
+			return claims, "oidc", true
+		}
+	}
+	if idToken != "" {
+		var claims *oidc.Claims
+		if claims, err = h.opts.Verifier.Verify(r.Context(), idToken); err == nil {
+			return claims, "oidc-id-token", true
+		}
+	}
+	if key == "" {
 		h.metricAuthFail()
 		writeJSONError(w, http.StatusUnauthorized, "invalid token: "+err.Error())
 		return nil, "", false
 	}
-	return claims, "oidc", true
+
+	if h.opts.APIKeys == nil {
+		h.metricAuthFail()
+		writeJSONError(w, http.StatusUnauthorized, "api key authentication is not enabled")
+		return nil, "", false
+	}
+	claims, err := h.opts.APIKeys.Authenticate(r.Context(), key)
+	if err != nil {
+		h.metricAuthFail()
+		// Undifferentiated on purpose: never leak unknown vs expired vs revoked.
+		writeJSONError(w, http.StatusUnauthorized, "invalid api key")
+		return nil, "", false
+	}
+	return claims, "api-key", true
 }
 
 // --- allowlist ---------------------------------------------------------------

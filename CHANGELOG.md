@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-29
+
+### Added
+- **qwproxy: Grafana `oauthPassThru` support via `X-ID-Token`.** Grafana forwards the signed-in user's *access* token as the bearer and their *ID token* in `X-ID-Token`. On an org authorization server the access token's `aud` is the org URL, so the proxy rejected every Grafana request even with Grafana's client id in `clientIds`. The proxy now also verifies `X-ID-Token` (same issuer, signature, expiry and `aud` checks), so Grafana queries are attributed to the real user (`auth_method = oidc-id-token`). Requires Grafana's OIDC client id in `proxy.oidc.clientIds`; Grafana also needs a refresh token (e.g. `offline_access` on Okta) or users get 401s once the ~1h ID token expires.
+- **`make e2e-grafana`**: a real Grafana 13 + Quickwit datasource plugin logging in through Keycloak and querying via qwproxy, asserting per-user attribution.
+
+### Changed
+- **A valid user OIDC token now takes precedence over `X-API-Key`** (order: bearer → `X-ID-Token` → API key). The Grafana Quickwit plugin runs its index-metadata init in the background with no user request, so no user token is forwarded; a datasource therefore needs `oauthPassThru` **plus** an `X-API-Key` custom header. The key authenticates the init call only, and user queries carrying both are attributed to the user rather than the key's creator. Requests with only a key behave as before.
+
 ## [0.5.1] - 2026-09-23
 
 ### Fixed

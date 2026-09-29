@@ -125,6 +125,8 @@ set `QWPROXY_APIKEY_DSN`); the `qw_api_keys` table self-applies at startup.
 
 **Per-environment isolation (audience).** The proxy verifies each token's audience against **this deployment's OIDC client id** (`QWPROXY_OIDC_CLIENT_ID`) and **refuses to start without one** — set the legacy `QWPROXY_OIDC_AUDIENCE`, or the dev-only `QWPROXY_INSECURE_SKIP_AUDIENCE=true`, if you really mean to skip it. To match, `qw` sends its OIDC **ID token** as the bearer by default: an ID token's `aud` is the client id, unique per app/env, so a token minted for stage is rejected by the prod proxy (and vice versa). Point one context at a different env's proxy and its token is turned away at the door. A custom authorization server that already stamps a real API audience on its access tokens can opt back in per context with `oidc.bearer-token: access-token` (or `QW_BEARER_TOKEN=access-token`).
 
+**Grafana (`oauthPassThru`).** Grafana sends the user's access token as the bearer and their ID token in `X-ID-Token`; the proxy verifies `X-ID-Token` too, and a valid user token wins over an API key. The Quickwit plugin's index-metadata init runs with no user attached, so give the datasource `oauthPassThru: true` **and** an `X-API-Key` custom header (the key covers init only; queries are audited as the user). Add Grafana's OIDC client id to `proxy.oidc.clientIds` and let Grafana refresh the ~1h ID token (`offline_access`). `make e2e-grafana` exercises this end to end.
+
 ## Handy commands
 
 ```sh
