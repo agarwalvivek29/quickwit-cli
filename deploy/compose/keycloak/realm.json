@@ -18,6 +18,16 @@
         "pkce.code.challenge.method": "S256",
         "oauth2.device.authorization.grant.enabled": "true"
       }
+    },
+    {
+      "clientId": "grafana",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "grafana-secret",
+      "standardFlowEnabled": true,
+      "redirectUris": ["http://grafana:3000/login/generic_oauth"],
+      "webOrigins": ["+"],
+      "attributes": { "pkce.code.challenge.method": "S256" }
     }
   ],
   "users": [
