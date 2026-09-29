@@ -37,6 +37,11 @@ const maxMSearchBody = 256 * 1024
 // lookup — no OIDC validation.
 const apiKeyHeader = "X-API-Key"
 
+// idTokenHeader is where Grafana's oauthPassThru forwards the user's ID token.
+// Its Authorization bearer is the access token, whose org-server aud is the
+// org URL, so only the ID token carries Grafana's client id as aud.
+const idTokenHeader = "X-ID-Token"
+
 // TokenVerifier validates a raw bearer token and returns its identity claims.
 // *oidc.Verifier satisfies this.
 type TokenVerifier interface {
@@ -142,9 +147,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // authenticate resolves the caller's identity. An X-API-Key header takes
 // precedence and is validated by a local hash lookup (no OIDC); otherwise the
-// Authorization bearer is validated as an OIDC token. On failure it writes the
-// 401, counts the metric, and returns ok=false. The returned string records
-// which method succeeded ("api-key" | "oidc") for the audit trail.
+// Authorization bearer is validated as an OIDC token, falling back to an
+// X-ID-Token header if the bearer is absent or rejected. On failure it writes
+// the 401, counts the metric, and returns ok=false. The returned string records
+// which method succeeded ("api-key" | "oidc" | "oidc-id-token") for the audit
+// trail.
 func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (*oidc.Claims, string, bool) {
 	if key := r.Header.Get(apiKeyHeader); key != "" {
 		if h.opts.APIKeys == nil {
@@ -162,19 +169,29 @@ func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (*oidc.Cl
 		return claims, "api-key", true
 	}
 
-	raw, ok := bearerToken(r)
-	if !ok {
+	raw, hasBearer := bearerToken(r)
+	idToken := r.Header.Get(idTokenHeader)
+	if !hasBearer && idToken == "" {
 		h.metricAuthFail()
 		writeJSONError(w, http.StatusUnauthorized, "missing credentials (Authorization bearer or X-API-Key)")
 		return nil, "", false
 	}
-	claims, err := h.opts.Verifier.Verify(r.Context(), raw)
-	if err != nil {
-		h.metricAuthFail()
-		writeJSONError(w, http.StatusUnauthorized, "invalid token: "+err.Error())
-		return nil, "", false
+	var err error
+	if hasBearer {
+		var claims *oidc.Claims
+		if claims, err = h.opts.Verifier.Verify(r.Context(), raw); err == nil {
+			return claims, "oidc", true
+		}
 	}
-	return claims, "oidc", true
+	if idToken != "" {
+		var claims *oidc.Claims
+		if claims, err = h.opts.Verifier.Verify(r.Context(), idToken); err == nil {
+			return claims, "oidc-id-token", true
+		}
+	}
+	h.metricAuthFail()
+	writeJSONError(w, http.StatusUnauthorized, "invalid token: "+err.Error())
+	return nil, "", false
 }
 
 // --- allowlist ---------------------------------------------------------------

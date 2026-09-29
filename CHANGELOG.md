@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **qwproxy: Grafana `oauthPassThru` support via `X-ID-Token`.** Grafana forwards the signed-in user's *access* token as the bearer and their *ID token* in `X-ID-Token`. On an org authorization server the access token's `aud` is the org URL, so the proxy rejected every Grafana request even with Grafana's client id in `clientIds`. The proxy now falls back to verifying `X-ID-Token` (same issuer, signature, expiry and `aud` checks) when the bearer is absent or rejected, so a Grafana datasource with `oauthPassThru: true` is attributed to the real user (`auth_method = oidc-id-token`). Requires Grafana's freeway client id in `proxy.oidc.clientIds`; to avoid 401s once the ~1h ID token expires, Grafana needs a refresh token (`offline_access` scope + refresh grant on the OIDC app).
+
 ## [0.5.1] - 2026-09-23
 
 ### Fixed
