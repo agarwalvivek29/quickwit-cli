@@ -42,6 +42,16 @@ proxy:
     # Dev-only escape hatch: accept ANY token the issuer signs (no aud check).
     # The proxy REFUSES TO START unless clientId, audience, or this is set.
     insecureSkipAudience: false
+  # Service accounts: non-human API-key owners (agents, bots). Off until
+  # adminGroups is set. Only members of these IdP groups (the token's `groups`
+  # claim — on Okta, a groups claim on the app's ID token) can create service
+  # accounts and mint their keys. Requires the audit/api-key database.
+  serviceAccounts:
+    adminGroups: []
+    # Lifetimes a key may be minted with: "<n>d" or "never".
+    keyTTLs: ["30d", "90d", "never"]
+    # Log a warning for an active key unused for this many days.
+    staleDays: 90
   # Drop audit partitions older than this many months.
   retentionMonths: 12
   audit:

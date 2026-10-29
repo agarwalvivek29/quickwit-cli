@@ -60,9 +60,10 @@ type Info struct {
 	Prefix      string
 	Description string
 	CreatedAt   time.Time
-	ExpiresAt   time.Time
+	ExpiresAt   *time.Time // nil = never expires (service-account keys only)
 	RevokedAt   *time.Time
 	LastUsedAt  *time.Time
+	CreatedBy   string // minting admin's email (or sub); service-account keys only
 }
 
 // Store persists and validates API keys in Postgres.
@@ -133,9 +134,11 @@ func (s *Store) Create(ctx context.Context, sub, email, description string, ttl 
 	return &Created{ID: id, APIKey: raw, ExpiresAt: expiresAt}, nil
 }
 
-// Authenticate validates a raw key and returns the creator's identity claims for
-// the audit trail. It returns ErrInvalidKey for anything not currently valid.
-// A successful lookup asynchronously stamps last_used_at (best effort).
+// Authenticate validates a raw key and returns the identity it acts as for the
+// audit trail: the creator for a personal key, `sa:<name>` for a service-account
+// key. It returns ErrInvalidKey for anything not currently valid — including a
+// key whose service account is disabled. A successful lookup asynchronously
+// stamps last_used_at (best effort).
 func (s *Store) Authenticate(ctx context.Context, raw string) (*oidc.Claims, error) {
 	if !strings.HasPrefix(raw, KeyPrefix) {
 		return nil, ErrInvalidKey
@@ -143,21 +146,22 @@ func (s *Store) Authenticate(ctx context.Context, raw string) (*oidc.Claims, err
 	hash := hashKey(raw)
 
 	var (
-		sub, email string
-		expiresAt  time.Time
-		revokedAt  *time.Time
+		sub, email           string
+		expiresAt, revokedAt *time.Time
+		disabledAt           *time.Time
 	)
 	err := s.pool.QueryRow(ctx,
-		`SELECT principal_sub, COALESCE(principal_email,''), expires_at, revoked_at
-		 FROM qw_api_keys WHERE key_hash = $1`, hash,
-	).Scan(&sub, &email, &expiresAt, &revokedAt)
+		`SELECT k.principal_sub, COALESCE(k.principal_email,''), k.expires_at, k.revoked_at, sa.disabled_at
+		 FROM qw_api_keys k LEFT JOIN qw_service_accounts sa ON sa.id = k.service_account_id
+		 WHERE k.key_hash = $1`, hash,
+	).Scan(&sub, &email, &expiresAt, &revokedAt, &disabledAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrInvalidKey
 	}
 	if err != nil {
 		return nil, fmt.Errorf("lookup api key: %w", err)
 	}
-	if revokedAt != nil || !expiresAt.After(s.now()) {
+	if revokedAt != nil || disabledAt != nil || (expiresAt != nil && !expiresAt.After(s.now())) {
 		return nil, ErrInvalidKey
 	}
 
@@ -168,17 +172,25 @@ func (s *Store) Authenticate(ctx context.Context, raw string) (*oidc.Claims, err
 // List returns the caller's own keys, newest first.
 func (s *Store) List(ctx context.Context, sub string) ([]Info, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, prefix, COALESCE(description,''), created_at, expires_at, revoked_at, last_used_at
+		`SELECT id::text, prefix, COALESCE(description,''), created_at, expires_at, revoked_at, last_used_at,
+		        COALESCE(created_by_email, created_by_sub, '')
 		 FROM qw_api_keys WHERE principal_sub = $1 ORDER BY created_at DESC`, sub)
 	if err != nil {
 		return nil, fmt.Errorf("list api keys: %w", err)
 	}
+	return scanInfos(rows)
+}
+
+// scanInfos reads rows selected as: id, prefix, description, created_at,
+// expires_at, revoked_at, last_used_at, created_by.
+func scanInfos(rows pgx.Rows) ([]Info, error) {
 	defer rows.Close()
 
 	var out []Info
 	for rows.Next() {
 		var in Info
-		if err := rows.Scan(&in.ID, &in.Prefix, &in.Description, &in.CreatedAt, &in.ExpiresAt, &in.RevokedAt, &in.LastUsedAt); err != nil {
+		if err := rows.Scan(&in.ID, &in.Prefix, &in.Description, &in.CreatedAt, &in.ExpiresAt,
+			&in.RevokedAt, &in.LastUsedAt, &in.CreatedBy); err != nil {
 			return nil, fmt.Errorf("scan api key: %w", err)
 		}
 		out = append(out, in)

@@ -65,6 +65,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(
 		newLoginCmd(app),
 		newAPIKeyCmd(app),
+		newServiceAccountCmd(app),
 		newContextCmd(app),
 		newConfigCmd(app),
 		newIndexesCmd(app),

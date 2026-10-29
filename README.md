@@ -113,6 +113,40 @@ call they make is attributed to you in the audit trail. Server-side the feature 
 enabled automatically when the proxy has a database (it reuses the audit DSN, or
 set `QWPROXY_APIKEY_DSN`); the `qw_api_keys` table self-applies at startup.
 
+## Service accounts (keys for agents and bots)
+
+An agent or bot that can't log in with OIDC gets a **service account**: a
+non-human identity that owns API keys instead of a person. Its calls are audited
+as `sa:<name>` (`auth_method = sa-key`), and its keys keep working when the admin
+who made them leaves. Only members of the proxy's admin groups can manage them.
+
+```sh
+qw sa create triage-bot --description "on-call log triage agent"
+qw sa key create triage-bot --ttl 90d     # 30d | 90d | never; the key is shown once
+qw sa list                                # accounts, active keys, last use
+qw sa key list triage-bot                 # keys, who minted them, expiry, last use, status
+qw sa key revoke triage-bot <key-id>      # kill one key
+qw sa disable triage-bot                  # kill every key of the account at once
+```
+
+The agent then authenticates with `QW_API_KEY=<key>` (or `--api-key`); the key is
+not saved to the admin's context. `qw sa key list` marks an active key unused for
+90 days as `stale`, and qwproxy logs a warning for each such key at startup and
+daily, so a forgotten `never` key gets noticed.
+
+Server side (off by default):
+
+| Env | Chart value | Default | Meaning |
+|---|---|---|---|
+| `QWPROXY_SA_ADMIN_GROUPS` | `proxy.serviceAccounts.adminGroups` | *(empty: disabled)* | IdP groups (token `groups` claim) allowed to manage service accounts |
+| `QWPROXY_SA_KEY_TTLS` | `proxy.serviceAccounts.keyTTLs` | `30d,90d,never` | Lifetimes a key may be minted with |
+| `QWPROXY_SA_STALE_DAYS` | `proxy.serviceAccounts.staleDays` | `90` | Unused-key warning threshold |
+
+The admin's ID token must carry a `groups` claim (on Okta: a groups claim on the
+qwproxy app's ID token). All operations use the single path
+`/qwproxy/serviceaccounts` with query params, so a fronting gateway needs exactly
+one route for it (all methods).
+
 ## Configuration
 
 `qw` keeps its contexts and cached tokens in one YAML file (kubeconfig-style), resolved in order:
