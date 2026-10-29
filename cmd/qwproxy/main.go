@@ -158,6 +158,21 @@ func run(log *slog.Logger) error {
 			time.Duration(cfg.apikeyMaxTTLDays)*24*time.Hour)
 		mux.Handle(proxy.BasePath, admin)
 		mux.Handle(proxy.BasePath+"/", admin)
+
+		// Service accounts: non-human key owners (agents) managed only by the
+		// configured admin groups. Off unless QWPROXY_SA_ADMIN_GROUPS is set.
+		if len(cfg.saAdminGroups) > 0 {
+			saAdmin, err := proxy.NewServiceAccountAdmin(keyStore, verifier, cfg.saAdminGroups, cfg.saKeyTTLs)
+			if err != nil {
+				return err
+			}
+			mux.Handle(proxy.ServiceAccountsPath, saAdmin)
+			mux.Handle(proxy.ServiceAccountsPath+"/", saAdmin)
+			go warnStaleServiceAccountKeys(ctx, log, keyStore, time.Duration(cfg.saStaleDays)*24*time.Hour)
+			log.Info("service accounts enabled", "admin_groups", cfg.saAdminGroups, "key_ttls", cfg.saKeyTTLs)
+		} else {
+			log.Info("service accounts disabled: QWPROXY_SA_ADMIN_GROUPS not set")
+		}
 	}
 	mux.Handle("/", handler)
 
@@ -190,6 +205,41 @@ func run(log *slog.Logger) error {
 	return nil
 }
 
+// warnStaleServiceAccountKeys logs, at startup and then daily, every active
+// service-account key unused for longer than unusedFor, so a forgotten
+// never-expiring key gets noticed and revoked. Every replica logs; that is fine
+// for an alert-on-log signal.
+func warnStaleServiceAccountKeys(ctx context.Context, log *slog.Logger, store *apikey.Store, unusedFor time.Duration) {
+	check := func() {
+		keys, err := store.StaleServiceAccountKeys(ctx, unusedFor)
+		if err != nil {
+			log.Warn("stale service-account key check failed", "err", err)
+			return
+		}
+		for _, k := range keys {
+			lastUsed := "never"
+			if k.LastUsedAt != nil {
+				lastUsed = k.LastUsedAt.Format(time.RFC3339)
+			}
+			log.Warn("service-account key unused; revoke it if no longer needed",
+				"service_account", k.ServiceAccount, "key_id", k.ID, "prefix", k.Prefix,
+				"created_at", k.CreatedAt.Format(time.RFC3339), "last_used_at", lastUsed,
+				"unused_days_threshold", int(unusedFor.Hours()/24))
+		}
+	}
+	check()
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			check()
+		}
+	}
+}
+
 type config struct {
 	listenAddr string
 	upstream   string
@@ -216,10 +266,19 @@ type config struct {
 	// auditDSN (they normally share one database). Empty overall disables keys.
 	apiKeyDSN        string
 	apikeyMaxTTLDays int
-	auditBuffer      int
-	auditBatch       int
-	auditFlushMS     int
-	retentionMonths  int
+	// saAdminGroups are the IdP groups (token `groups` claim) allowed to manage
+	// service accounts; empty disables the feature.
+	saAdminGroups []string
+	// saKeyTTLs are the lifetimes a service-account key may be minted with:
+	// "<n>d" or "never".
+	saKeyTTLs []string
+	// saStaleDays is how long an active service-account key may go unused
+	// before qwproxy logs a warning about it.
+	saStaleDays     int
+	auditBuffer     int
+	auditBatch      int
+	auditFlushMS    int
+	retentionMonths int
 
 	// Audit-store Postgres pool sizing. Bounds how many connections qwproxy
 	// opens against the audit DB so it cannot exhaust Postgres max_connections.
@@ -290,6 +349,9 @@ func loadConfig() config {
 		auditDSN:             env("QWPROXY_AUDIT_DSN", ""),
 		apiKeyDSN:            env("QWPROXY_APIKEY_DSN", ""),
 		apikeyMaxTTLDays:     envInt("QWPROXY_APIKEY_MAX_TTL_DAYS", 30),
+		saAdminGroups:        envList("QWPROXY_SA_ADMIN_GROUPS"),
+		saKeyTTLs:            envListOr("QWPROXY_SA_KEY_TTLS", []string{"30d", "90d", "never"}),
+		saStaleDays:          envInt("QWPROXY_SA_STALE_DAYS", 90),
 		auditBuffer:          envInt("QWPROXY_AUDIT_BUFFER", 4096),
 		auditBatch:           envInt("QWPROXY_AUDIT_BATCH", 100),
 		auditFlushMS:         envInt("QWPROXY_AUDIT_FLUSH_MS", 1000),
@@ -323,6 +385,13 @@ func envList(key string) []string {
 		}
 	}
 	return out
+}
+
+func envListOr(key string, def []string) []string {
+	if v := envList(key); len(v) > 0 {
+		return v
+	}
+	return def
 }
 
 func envInt(key string, def int) int {

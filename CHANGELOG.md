@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Service accounts** for agents and bots that can't use OIDC. `qw sa create|list|disable` and `qw sa key create|list|revoke` (served at `GET|POST|DELETE /qwproxy/serviceaccounts`, query params only, so a gateway needs one route). Keys are minted with `--ttl 30d|90d|never` (allowed set: `QWPROXY_SA_KEY_TTLS`), are audited as `sa:<name>` with `auth_method = sa-key`, and record the admin who minted them. Disabling an account invalidates all of its keys at once. Management requires an OIDC login **and** membership in a group listed in `QWPROXY_SA_ADMIN_GROUPS` (read from the token's `groups` claim); the feature is off when that is unset. `qw sa key list` flags active keys unused for 90 days as `stale`, and qwproxy logs a warning for each at startup and daily (`QWPROXY_SA_STALE_DAYS`). Helm: `proxy.serviceAccounts.*`.
+
+### Changed
+- The `qw_api_keys` schema self-migrates on startup: new `service_account_id`, `created_by_sub`, `created_by_email` columns and a nullable `expires_at` (personal keys still always expire). Existing keys are unaffected. `GET /qwproxy/apikeys` now returns `expires_at: null` for a non-expiring key and an optional `created_by`.
+
 ## [0.6.0] - 2026-09-29
 
 ### Added

@@ -156,6 +156,42 @@ func TestVerifierValidToken(t *testing.T) {
 	}
 }
 
+// The groups claim authorizes service-account admins. A malformed one (here a
+// bare string) must not drop the other claims.
+func TestVerifierGroupsClaim(t *testing.T) {
+	m := newMockOP(t)
+	ctx := context.Background()
+	v, err := NewVerifier(ctx, m.issuer, []string{m.audience}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mint := func(groups any) string {
+		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+			"iss": m.issuer, "sub": "u", "aud": m.audience, "email": "u@example.com",
+			"exp": time.Now().Add(time.Hour).Unix(), "groups": groups,
+		})
+		tok.Header["kid"] = m.kid
+		s, _ := tok.SignedString(m.key)
+		return s
+	}
+
+	claims, err := v.Verify(ctx, mint([]string{"DevOps-Engineering-L2", "Engineering"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claims.Groups) != 2 || claims.Groups[0] != "DevOps-Engineering-L2" {
+		t.Errorf("groups = %v", claims.Groups)
+	}
+
+	claims, err = v.Verify(ctx, mint("DevOps-Engineering-L2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.Groups != nil || claims.Email != "u@example.com" {
+		t.Errorf("malformed groups: claims = %+v, want no groups but email kept", claims)
+	}
+}
+
 func TestVerifierRejects(t *testing.T) {
 	m := newMockOP(t)
 	ctx := context.Background()

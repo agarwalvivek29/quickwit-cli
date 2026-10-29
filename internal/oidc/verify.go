@@ -26,6 +26,9 @@ type Claims struct {
 	Subject           string
 	Email             string
 	PreferredUsername string
+	// Groups is the IdP's `groups` claim (e.g. Okta's groups claim on the ID
+	// token). The proxy uses it only to authorize service-account management.
+	Groups []string
 }
 
 // Options overrides how the proxy reaches the identity provider. The zero value
@@ -164,9 +167,15 @@ func (v *Verifier) Verify(ctx context.Context, rawToken string) (*Claims, error)
 		PreferredUsername string `json:"preferred_username"`
 	}
 	_ = tok.Claims(&extra)
+	// Decoded separately so an unexpected `groups` shape can't drop the email.
+	var g struct {
+		Groups []string `json:"groups"`
+	}
+	_ = tok.Claims(&g)
 	return &Claims{
 		Subject:           tok.Subject,
 		Email:             extra.Email,
 		PreferredUsername: extra.PreferredUsername,
+		Groups:            g.Groups,
 	}, nil
 }

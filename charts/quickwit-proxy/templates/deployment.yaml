@@ -57,6 +57,16 @@ spec:
               value: {{ .Values.proxy.oidc.audience | quote }}
             - name: QWPROXY_INSECURE_SKIP_AUDIENCE
               value: {{ .Values.proxy.oidc.insecureSkipAudience | quote }}
+            {{- with .Values.proxy.serviceAccounts }}
+            {{- with .adminGroups }}
+            - name: QWPROXY_SA_ADMIN_GROUPS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            - name: QWPROXY_SA_KEY_TTLS
+              value: {{ join "," .keyTTLs | quote }}
+            - name: QWPROXY_SA_STALE_DAYS
+              value: {{ .staleDays | quote }}
+            {{- end }}
             - name: QWPROXY_RETENTION_MONTHS
               value: {{ .Values.proxy.retentionMonths | quote }}
             - name: QWPROXY_AUDIT_BUFFER

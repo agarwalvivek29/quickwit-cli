@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agarwalvivek29/quickwit-cli/internal/apikey"
 	"github.com/agarwalvivek29/quickwit-cli/internal/audit"
 	"github.com/agarwalvivek29/quickwit-cli/internal/oidc"
 )
@@ -148,7 +149,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Authorization bearer is tried first, then X-ID-Token, then X-API-Key (a local
 // hash lookup, no OIDC). On failure it writes the 401, counts the metric, and
 // returns ok=false. The returned string records which method succeeded
-// ("oidc" | "oidc-id-token" | "api-key") for the audit trail.
+// ("oidc" | "oidc-id-token" | "api-key" | "sa-key") for the audit trail.
 func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (*oidc.Claims, string, bool) {
 	raw, hasBearer := bearerToken(r)
 	idToken := r.Header.Get(idTokenHeader)
@@ -189,6 +190,9 @@ func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (*oidc.Cl
 		// Undifferentiated on purpose: never leak unknown vs expired vs revoked.
 		writeJSONError(w, http.StatusUnauthorized, "invalid api key")
 		return nil, "", false
+	}
+	if strings.HasPrefix(claims.Subject, apikey.ServiceAccountSubjectPrefix) {
+		return claims, "sa-key", true
 	}
 	return claims, "api-key", true
 }

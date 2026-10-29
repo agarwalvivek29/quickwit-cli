@@ -59,29 +59,15 @@ type infoResponse struct {
 	Prefix      string     `json:"prefix"`
 	Description string     `json:"description,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
-	ExpiresAt   time.Time  `json:"expires_at"`
+	ExpiresAt   *time.Time `json:"expires_at"` // null = never expires
 	RevokedAt   *time.Time `json:"revoked_at,omitempty"`
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	CreatedBy   string     `json:"created_by,omitempty"`
 }
 
 func (h *APIKeyAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Management always requires an OIDC login; a key cannot manage keys.
-	if r.Header.Get(apiKeyHeader) != "" {
-		writeJSONError(w, http.StatusUnauthorized, "api keys must be managed with an OIDC login, not an API key")
-		return
-	}
-	raw, ok := bearerToken(r)
+	claims, ok := oidcCaller(w, r, h.verifier)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing bearer token")
-		return
-	}
-	claims, err := h.verifier.Verify(r.Context(), raw)
-	if err != nil {
-		writeJSONError(w, http.StatusUnauthorized, "invalid token: "+err.Error())
-		return
-	}
-	if claims.Subject == "" {
-		writeJSONError(w, http.StatusUnauthorized, "token has no subject")
 		return
 	}
 
@@ -145,6 +131,10 @@ func (h *APIKeyAdmin) list(w http.ResponseWriter, r *http.Request, claims *oidc.
 		writeJSONError(w, http.StatusInternalServerError, "list api keys: "+err.Error())
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"api_keys": infoResponses(keys)})
+}
+
+func infoResponses(keys []apikey.Info) []infoResponse {
 	out := make([]infoResponse, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, infoResponse{
@@ -155,9 +145,35 @@ func (h *APIKeyAdmin) list(w http.ResponseWriter, r *http.Request, claims *oidc.
 			ExpiresAt:   k.ExpiresAt,
 			RevokedAt:   k.RevokedAt,
 			LastUsedAt:  k.LastUsedAt,
+			CreatedBy:   k.CreatedBy,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"api_keys": out})
+	return out
+}
+
+// oidcCaller authenticates a management request. Management always requires an
+// OIDC login — an X-API-Key is refused, so a key can never mint or manage keys.
+// On failure it writes the 401 and returns ok=false.
+func oidcCaller(w http.ResponseWriter, r *http.Request, verifier TokenVerifier) (*oidc.Claims, bool) {
+	if r.Header.Get(apiKeyHeader) != "" {
+		writeJSONError(w, http.StatusUnauthorized, "api keys must be managed with an OIDC login, not an API key")
+		return nil, false
+	}
+	raw, ok := bearerToken(r)
+	if !ok {
+		writeJSONError(w, http.StatusUnauthorized, "missing bearer token")
+		return nil, false
+	}
+	claims, err := verifier.Verify(r.Context(), raw)
+	if err != nil {
+		writeJSONError(w, http.StatusUnauthorized, "invalid token: "+err.Error())
+		return nil, false
+	}
+	if claims.Subject == "" {
+		writeJSONError(w, http.StatusUnauthorized, "token has no subject")
+		return nil, false
+	}
+	return claims, true
 }
 
 func (h *APIKeyAdmin) revoke(w http.ResponseWriter, r *http.Request, claims *oidc.Claims, id string) {

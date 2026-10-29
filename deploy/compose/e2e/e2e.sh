@@ -124,4 +124,45 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$PROXY/api/v1/core-logs/se
   -H "X-API-Key: $KEY" -H 'content-type: application/json' --data '{"query":"*","max_hits":1}')
 [ "$code" = "401" ] || fail "revoked key returned $code, want 401"
 
+# --- service accounts: admin-group gate -> never-expiring key -> disable ------
+echo "e2e: non-admin (viewer, no qw-sa-admins group) cannot manage service accounts (403)"
+VIEWER=$(curl -sf -XPOST "$KC/protocol/openid-connect/token" -d grant_type=password -d client_id=qw-cli \
+  -d username=viewer -d password=viewer -d scope=openid | grep -o '"id_token":"[^"]*"' | sed 's/.*:"//; s/"$//')
+[ -n "$VIEWER" ] || fail "no viewer id_token"
+code=$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$PROXY/qwproxy/serviceaccounts" \
+  -H "Authorization: Bearer $VIEWER" --data '{"name":"nope"}')
+[ "$code" = "403" ] || fail "non-admin sa create returned $code, want 403"
+
+echo "e2e: qw sa create (admin via groups claim)"
+/tmp/qw sa create e2e-bot --description "e2e agent" || fail "sa create failed"
+
+echo "e2e: qw sa key create --ttl never"
+SACREATE=$(/tmp/qw sa key create e2e-bot --ttl never) || fail "sa key create failed"
+SAKEY=$(printf '%s' "$SACREATE" | grep -o 'qw_pat_[0-9a-f]\{64\}' | head -1)
+SAKID=$(printf '%s' "$SACREATE" | sed -n 's/^  id:[[:space:]]*//p')
+[ -n "$SAKEY" ] || fail "no sa key in create output"
+printf '%s' "$SACREATE" | grep -q 'expires: never' || fail "sa key is not marked never-expiring"
+
+echo "e2e: disallowed ttl rejected"
+if /tmp/qw sa key create e2e-bot --ttl 365d >/dev/null 2>&1; then fail "365d ttl was accepted"; fi
+
+echo "e2e: search with the service-account key (200)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$PROXY/api/v1/core-logs/search" \
+  -H "X-API-Key: $SAKEY" -H 'content-type: application/json' --data '{"query":"*","max_hits":1}')
+[ "$code" = "200" ] || fail "sa key search returned $code, want 200"
+
+echo "e2e: a service-account key cannot manage service accounts (401)"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$PROXY/qwproxy/serviceaccounts" -H "X-API-Key: $SAKEY")
+[ "$code" = "401" ] || fail "sa key listing service accounts returned $code, want 401"
+
+echo "e2e: qw sa list / key list show the account and key"
+/tmp/qw sa list | grep e2e-bot | grep -q active || fail "sa list missing active e2e-bot"
+/tmp/qw sa key list e2e-bot | grep "$SAKID" | grep -q never || fail "sa key list missing never-expiring $SAKID"
+
+echo "e2e: qw sa disable kills the key (401)"
+/tmp/qw sa disable e2e-bot || fail "sa disable failed"
+code=$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$PROXY/api/v1/core-logs/search" \
+  -H "X-API-Key: $SAKEY" -H 'content-type: application/json' --data '{"query":"*","max_hits":1}')
+[ "$code" = "401" ] || fail "key of disabled sa returned $code, want 401"
+
 echo "E2E OK"

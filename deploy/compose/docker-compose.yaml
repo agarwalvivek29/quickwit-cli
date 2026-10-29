@@ -67,6 +67,8 @@ services:
       # Grafana's ID token arrives in X-ID-Token (aud = grafana).
       QWPROXY_OIDC_CLIENT_IDS: grafana
       QWPROXY_AUDIT_DSN: postgres://qwaudit:qwaudit@postgres:5432/qwaudit?sslmode=disable
+      # Keycloak puts user dev (not viewer) in this group via the qw-cli groups mapper.
+      QWPROXY_SA_ADMIN_GROUPS: qw-sa-admins
     ports:
       - "9000:9000"
     depends_on:
