@@ -17,7 +17,21 @@
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "oauth2.device.authorization.grant.enabled": "true"
-      }
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
     },
     {
       "clientId": "grafana",
@@ -40,7 +54,25 @@
       "lastName": "User",
       "credentials": [
         { "type": "password", "value": "dev", "temporary": false }
+      ],
+      "groups": ["/qw-sa-admins"]
+    },
+    {
+      "username": "viewer",
+      "enabled": true,
+      "email": "viewer@example.com",
+      "emailVerified": true,
+      "firstName": "View",
+      "lastName": "Only",
+      "credentials": [
+        { "type": "password", "value": "viewer", "temporary": false }
       ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "qw-sa-admins",
+      "path": "/qw-sa-admins"
     }
   ]
 }
