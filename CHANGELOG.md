@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-29
+
 ### Added
 - **Service accounts** for agents and bots that can't use OIDC. `qw sa create|list|disable` and `qw sa key create|list|revoke` (served at `GET|POST|DELETE /qwproxy/serviceaccounts`, query params only, so a gateway needs one route). Keys are minted with `--ttl 30d|90d|never` (allowed set: `QWPROXY_SA_KEY_TTLS`), are audited as `sa:<name>` with `auth_method = sa-key`, and record the admin who minted them. Disabling an account invalidates all of its keys at once. Management requires an OIDC login **and** membership in a group listed in `QWPROXY_SA_ADMIN_GROUPS` (read from the token's `groups` claim); the feature is off when that is unset. `qw sa key list` flags active keys unused for 90 days as `stale`, and qwproxy logs a warning for each at startup and daily (`QWPROXY_SA_STALE_DAYS`). Helm: `proxy.serviceAccounts.*`.
 
