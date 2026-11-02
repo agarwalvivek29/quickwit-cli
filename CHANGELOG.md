@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Service-account admins got 403 on Okta.** Okta's org authorization server only puts the `groups` claim in the ID token when the `groups` scope is requested, and `qw login` never asked for it. The CLI now adds `groups` to its default scopes whenever the IdP advertises it in `scopes_supported` (an explicit `oidc.scopes` in the context still wins). qwproxy still matches the full group list against `QWPROXY_SA_ADMIN_GROUPS`, so no Okta groups-claim filter is needed. A refresh can't add a scope, so existing sessions need one `qw login`; the proxy's 403 now says so when the token has no `groups` claim.
+
 ## [0.7.0] - 2026-10-29
 
 ### Added

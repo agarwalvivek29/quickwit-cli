@@ -123,7 +123,12 @@ func (h *ServiceAccountAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !h.isAdmin(claims) {
-		writeJSONError(w, http.StatusForbidden, "service-account management requires membership in an admin group")
+		msg := "service-account management requires membership in an admin group"
+		if len(claims.Groups) == 0 {
+			// A refresh can't add the groups scope to an older login.
+			msg += "; your token has no groups claim, run `qw login` again"
+		}
+		writeJSONError(w, http.StatusForbidden, msg)
 		return
 	}
 	if strings.TrimPrefix(r.URL.Path, ServiceAccountsPath) != "" {
