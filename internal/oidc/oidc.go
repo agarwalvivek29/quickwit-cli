@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os/exec"
 	"runtime"
+	"slices"
 	"time"
 
 	coreoidc "github.com/coreos/go-oidc/v3/oidc"
@@ -42,6 +43,11 @@ func randomState() (string, error) {
 // for the audit identity, and offline_access so the provider returns a refresh
 // token.
 var defaultScopes = []string{coreoidc.ScopeOpenID, "profile", "email", coreoidc.ScopeOfflineAccess}
+
+// scopeGroups puts the `groups` claim (service-account admin check) in the ID
+// token. Requested only when advertised: Okta's org server emits the claim only
+// for this scope, while IdPs that don't know it may reject the whole request.
+const scopeGroups = "groups"
 
 // ProviderConfig is the per-context identity config.
 type ProviderConfig struct {
@@ -91,19 +97,23 @@ func New(ctx context.Context, pc ProviderConfig) (*Authenticator, error) {
 	if err != nil {
 		return nil, fmt.Errorf("oidc discovery for %s: %w", pc.Issuer, err)
 	}
-	scopes := pc.Scopes
-	if len(scopes) == 0 {
-		scopes = defaultScopes
-	}
-
 	ep := provider.Endpoint()
 	// The device authorization endpoint is not part of the standard oauth2
 	// endpoint that go-oidc surfaces, so pull it from the raw discovery doc.
 	var disco struct {
-		DeviceAuthURL string `json:"device_authorization_endpoint"`
+		DeviceAuthURL   string   `json:"device_authorization_endpoint"`
+		ScopesSupported []string `json:"scopes_supported"`
 	}
 	_ = provider.Claims(&disco)
 	ep.DeviceAuthURL = disco.DeviceAuthURL
+
+	scopes := pc.Scopes
+	if len(scopes) == 0 {
+		scopes = defaultScopes
+		if slices.Contains(disco.ScopesSupported, scopeGroups) {
+			scopes = append(slices.Clone(defaultScopes), scopeGroups)
+		}
+	}
 
 	conf := &oauth2.Config{
 		ClientID:     pc.ClientID,

@@ -24,6 +24,8 @@ func (groupVerifier) Verify(_ context.Context, raw string) (*oidc.Claims, error)
 		return &oidc.Claims{Subject: "a1", Email: "a1@example.com", Groups: []string{"Engineering", "qw-admins"}}, nil
 	case "good":
 		return &oidc.Claims{Subject: "u1", Email: "u1@example.com", Groups: []string{"Engineering"}}, nil
+	case "nogroups":
+		return &oidc.Claims{Subject: "u2", Email: "u2@example.com"}, nil
 	}
 	return nil, errors.New("bad token")
 }
@@ -121,6 +123,16 @@ func TestSAAdminRequiresAdminGroup(t *testing.T) {
 	}
 	if len(svc.calls) != 0 {
 		t.Fatalf("store called for a non-admin: %v", svc.calls)
+	}
+	if strings.Contains(w.Body.String(), "qw login") {
+		t.Errorf("re-login hint shown to a caller that has groups: %s", w.Body)
+	}
+}
+
+func TestSAAdminNoGroupsClaimHintsRelogin(t *testing.T) {
+	w := saReq(newSAAdmin(t, &stubSASvc{}), http.MethodGet, ServiceAccountsPath, "nogroups", "")
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "qw login") {
+		t.Fatalf("status = %d body = %s, want 403 with re-login hint", w.Code, w.Body)
 	}
 }
 

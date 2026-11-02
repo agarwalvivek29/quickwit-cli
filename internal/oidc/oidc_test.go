@@ -27,6 +27,7 @@ type mockOP struct {
 	clientID     string
 	audience     string
 	lastVerifier string // code_verifier seen at /token (proves PKCE wiring)
+	scopes       []string
 }
 
 func newMockOP(t *testing.T) *mockOP {
@@ -46,6 +47,7 @@ func newMockOP(t *testing.T) *mockOP {
 			"jwks_uri":                              m.issuer + "/jwks",
 			"device_authorization_endpoint":         m.issuer + "/device",
 			"id_token_signing_alg_values_supported": []string{"RS256"},
+			"scopes_supported":                      m.scopes,
 		})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
@@ -316,6 +318,36 @@ func TestLoginPKCE(t *testing.T) {
 	}
 	if m.lastVerifier == "" {
 		t.Error("token endpoint did not receive a PKCE code_verifier")
+	}
+}
+
+func TestDefaultScopesAddGroupsOnlyWhenAdvertised(t *testing.T) {
+	cases := []struct {
+		name       string
+		advertised []string
+		configured []string
+		want       string
+	}{
+		{"okta advertises groups", []string{"openid", "groups"}, nil, "openid profile email offline_access groups"},
+		{"not advertised", []string{"openid", "profile"}, nil, "openid profile email offline_access"},
+		{"explicit scopes win", []string{"openid", "groups"}, []string{"openid", "email"}, "openid email"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMockOP(t)
+			m.scopes = tc.advertised
+			a, err := New(context.Background(), ProviderConfig{Issuer: m.issuer, ClientID: m.clientID, Scopes: tc.configured})
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, err := url.Parse(a.conf.AuthCodeURL("state"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := u.Query().Get("scope"); got != tc.want {
+				t.Errorf("scope = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
